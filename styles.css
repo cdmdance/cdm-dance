@@ -432,7 +432,24 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: var(--shadow-soft);
 }
+.calendly-embed {
+  background: var(--bg-alt);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
 
+@media (max-width: 720px) {
+  .calendly-embed {
+    padding: 1rem;
+  }
+  
+  .calendly-inline-widget {
+    height: 650px !important;
+  }
+}
 .contact-form label {
   display: block;
   font-size: 0.85rem;

@@ -191,30 +191,37 @@
     </section>
 
     <!-- Contact -->
-    <div class="contact-layout">
-  <!-- Calendly Booking Widget -->
-  <div class="calendly-embed">
-    <!-- Calendly inline widget begin -->
-    <div class="calendly-inline-widget" data-url="https://calendly.com/carlos-cdm/15min" style="min-width:320px;height:700px;"></div>
-    <script type="text/javascript" src="https://assets.calendly.com/assets/external/widget.js" async></script>
-    <!-- Calendly inline widget end -->
-  </div>
+   <section id="contact" class="contact-section">
+  <h2>Ready to Dance?</h2>
   
-  <!-- Contact Info Sidebar -->
-  <div class="contact-details">
-    <h3>📅 Book Instantly or Call</h3>
-    <p><strong>Carlos @ CDM Dance</strong></p>
-    <p><strong>📱</strong> <a href="tel:+17278514793">Call/Text Now</a></p>
-    <p><strong>📧</strong> <a href="mailto:carlos@cdm.dance">carlos@cdm.dance</a></p>
-    <p><em>Tampa Bay's #1 Private Dance Instructor</em></p>
-    <ul class="quick-links">
-      <li>✅ Tampa, St. Pete, Clearwater</li>
-      <li>✅ Free 15-min consult</li>
-      <li>✅ In-home or studio lessons</li>
-      <li>✅ Wedding dance specialists</li>
-    </ul>
+  <div class="contact-container">
+    <!-- LEFT: Calendly (small) -->
+    <div class="calendly-column">
+      <h3>📅 Book Free Consult</h3>
+      <div class="calendly-embed-small">
+        <div class="calendly-inline-widget" 
+             data-url="https://calendly.com/carlos-cdm/15min" 
+             style="min-width:300px;height:500px;">
+        </div>
+        <script src="https://assets.calendly.com/assets/external/widget.js" async></script>
+      </div>
+    </div>
+
+    <!-- RIGHT: Contact Info -->
+    <div class="contact-info">
+      <h3>📞 Contact Me</h3>
+      <p><strong>Carlos Mateu</strong></p>
+      <p>🎯 Tampa Bay and Surrounding Areas</p>
+      <p>📱 <a href="tel:+17278514793" class="phone-link">(727)851-4793</a></p>
+      <p>📧 carlos@cdm.dance</p>
+      <div class="social-links">
+      <a href="https://facebook.com/cdmdance">📘 Facebook</a>
+      </div>
+    </div>
   </div>
-  </main>
+</section>
+  
+   </main>
 
   <footer class="site-footer">
     <div class="container footer-inner">
@@ -246,7 +253,9 @@
   } else {
     themeToggle.textContent = '🌙';
   }
-  
+  function scrollToCalendly() {
+  document.getElementById('calendly-section').scrollIntoView({behavior: 'smooth'});
+}
   // Toggle theme on click
   themeToggle.addEventListener('click', () => {
     const isDark = html.getAttribute('data-theme') === 'dark';
@@ -265,8 +274,7 @@
     }
   });
 </script>
-<button id="book-now" class="sticky-book" onclick="document.getElementById('contact').scrollIntoView({behavior:'smooth'})">
-  📅 Book Now
+<button class="book-btn" onclick="scrollToCalendly()">📅 Book Now</button>
 </button>
 </body>
 </html>

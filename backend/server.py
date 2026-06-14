@@ -83,6 +83,28 @@ class HostingIn(BaseModel):
     gcalEventId: str | None = ''
 
 
+class PackageIn(BaseModel):
+    id: str | None = None
+    name: str
+    lessons: int | float
+    price: int | float
+    description: str | None = ''
+    active: bool | str | None = True
+
+
+class PaymentIn(BaseModel):
+    id: str | None = None
+    date: str | None = None
+    studentId: str
+    studentName: str | None = ''
+    packageId: str | None = ''
+    packageName: str | None = ''
+    lessons: int | float | None = 0
+    amount: int | float
+    method: str | None = 'Cash'
+    notes: str | None = ''
+
+
 # --------- Auth routes ---------
 @api.post('/auth/login')
 async def login(body: LoginIn):
@@ -290,10 +312,173 @@ async def setup_ensure_tabs(user=Depends(auth_mod.require_staff)):
     return {'ok': True}
 
 
+# --------- Packages CRUD ---------
+@api.get('/packages')
+async def list_packages(user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    pkgs = await sheets_client.read_tab(creds, 'Packages')
+    return pkgs
+
+
+@api.post('/packages')
+async def create_package(body: PackageIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    rec = body.model_dump()
+    rec['active'] = 'TRUE' if (rec.get('active') is True or str(rec.get('active', '')).lower() in ('true', 'yes', '1')) else 'FALSE'
+    return await sheets_client.append_row(creds, 'Packages', rec)
+
+
+@api.put('/packages/{pkg_id}')
+async def update_package(pkg_id: str, body: PackageIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    if 'active' in patch:
+        patch['active'] = 'TRUE' if (patch['active'] is True or str(patch['active']).lower() in ('true', 'yes', '1')) else 'FALSE'
+    res = await sheets_client.update_row_by_id(creds, 'Packages', pkg_id, patch)
+    if not res:
+        raise HTTPException(status_code=404, detail='Package not found')
+    return res
+
+
+@api.delete('/packages/{pkg_id}')
+async def delete_package(pkg_id: str, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    ok = await sheets_client.delete_row_by_id(creds, 'Packages', pkg_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail='Package not found')
+    return {'ok': True}
+
+
+# --------- Payments (POS sales) ---------
+@api.get('/payments')
+async def list_payments(user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    return await sheets_client.read_tab(creds, 'Payments')
+
+
+@api.post('/payments')
+async def record_payment(body: PaymentIn, user=Depends(auth_mod.require_staff)):
+    """Record a package sale: writes a Payments row AND updates the student's
+    lessonsTotal + totalPaid in the Students tab."""
+    creds = await _require_creds()
+    rec = body.model_dump()
+    if not rec.get('date'):
+        rec['date'] = datetime.utcnow().date().isoformat()
+
+    # Fetch student for name + current totals
+    students = await sheets_client.read_tab(creds, 'Students')
+    student = next((s for s in students if s.get('id') == rec['studentId']), None)
+    if not student:
+        raise HTTPException(status_code=404, detail='Student not found')
+    if not rec.get('studentName'):
+        rec['studentName'] = student.get('name', '')
+
+    # If packageId provided, enrich with package data
+    if rec.get('packageId'):
+        pkgs = await sheets_client.read_tab(creds, 'Packages')
+        pkg = next((p for p in pkgs if p.get('id') == rec['packageId']), None)
+        if pkg:
+            rec['packageName'] = rec.get('packageName') or pkg.get('name', '')
+            if not rec.get('lessons'):
+                try:
+                    rec['lessons'] = int(float(pkg.get('lessons') or 0))
+                except Exception:
+                    rec['lessons'] = 0
+
+    # Save payment row
+    payment = await sheets_client.append_row(creds, 'Payments', rec)
+
+    # Update student totals
+    try:
+        cur_total_paid = float(student.get('totalPaid') or 0)
+    except Exception:
+        cur_total_paid = 0
+    try:
+        cur_lessons_total = float(student.get('lessonsTotal') or 0)
+    except Exception:
+        cur_lessons_total = 0
+    new_total_paid = cur_total_paid + float(rec.get('amount') or 0)
+    new_lessons_total = cur_lessons_total + float(rec.get('lessons') or 0)
+    await sheets_client.update_row_by_id(creds, 'Students', rec['studentId'], {
+        'totalPaid': new_total_paid,
+        'lessonsTotal': new_lessons_total,
+    })
+    return {'payment': payment, 'student_updated': {
+        'totalPaid': new_total_paid, 'lessonsTotal': new_lessons_total,
+    }}
+
+
+@api.delete('/payments/{pay_id}')
+async def delete_payment(pay_id: str, user=Depends(auth_mod.require_staff)):
+    """Delete a payment AND reverse its impact on the student totals."""
+    creds = await _require_creds()
+    payments = await sheets_client.read_tab(creds, 'Payments')
+    pay = next((p for p in payments if p.get('id') == pay_id), None)
+    if not pay:
+        raise HTTPException(status_code=404, detail='Payment not found')
+    # Reverse student totals
+    students = await sheets_client.read_tab(creds, 'Students')
+    student = next((s for s in students if s.get('id') == pay.get('studentId')), None)
+    if student:
+        try:
+            cur_paid = float(student.get('totalPaid') or 0)
+            cur_lessons = float(student.get('lessonsTotal') or 0)
+        except Exception:
+            cur_paid = 0
+            cur_lessons = 0
+        await sheets_client.update_row_by_id(creds, 'Students', student['id'], {
+            'totalPaid': max(0, cur_paid - float(pay.get('amount') or 0)),
+            'lessonsTotal': max(0, cur_lessons - float(pay.get('lessons') or 0)),
+        })
+    await sheets_client.delete_row_by_id(creds, 'Payments', pay_id)
+    return {'ok': True}
+
+
+# --------- Student lesson balance (combines purchases with calendar usage) ---------
+@api.get('/students/{student_id}/balance')
+async def student_balance(student_id: str, user=Depends(auth_mod.require_staff)):
+    """Compute lessons used (from calendar) and lessons remaining for a student."""
+    creds = await _require_creds()
+    students = await sheets_client.read_tab(creds, 'Students')
+    student = next((s for s in students if s.get('id') == student_id), None)
+    if not student:
+        raise HTTPException(status_code=404, detail='Student not found')
+    cal_id = 'primary'
+    events = await calendar_client.list_events(creds, days_back=730, days_forward=0, calendar_id=cal_id)
+    known_names = [s.get('name', '').strip() for s in students if s.get('name')]
+    today = datetime.utcnow().date().isoformat()
+    lessons_used = 0
+    for e in events:
+        if e.get('date', '') >= today:
+            continue
+        info = calendar_income.classify_event(e.get('summary', ''), known_names=known_names)
+        if info['type'] == 'lesson':
+            if calendar_income.canonical_name(info.get('student', '')).lower() == student.get('name', '').lower():
+                # If multi-student lesson with names list, count once per appearance
+                if info.get('names'):
+                    lessons_used += sum(1 for n in info['names']
+                                        if calendar_income.canonical_name(n).lower() == student.get('name', '').lower())
+                else:
+                    lessons_used += 1
+    try:
+        lessons_total = float(student.get('lessonsTotal') or 0)
+        total_paid = float(student.get('totalPaid') or 0)
+    except Exception:
+        lessons_total = 0
+        total_paid = 0
+    return {
+        'studentId': student_id,
+        'name': student.get('name'),
+        'lessonsTotal': lessons_total,
+        'lessonsUsed': lessons_used,
+        'lessonsRemaining': max(0, lessons_total - lessons_used),
+        'totalPaid': total_paid,
+    }
+
+
 @api.post('/setup/import-students')
 async def import_students(user=Depends(auth_mod.require_staff)):
-    """Reset Students/Lessons/Hostings tabs (wipe everything from old schema)
-    and seed Students with the real data from the uploaded file."""
+    """Reset all CRM tabs (wipe old/incompatible schema) and seed Students with the real data."""
     creds = await _require_creds()
     seed_path = ROOT_DIR / 'seed' / 'students_seed.json'
     if not seed_path.exists():
@@ -301,11 +486,11 @@ async def import_students(user=Depends(auth_mod.require_staff)):
     import json
     with open(seed_path) as f:
         students = json.load(f)
-    # Reset all three CRM tabs to match the new schema
-    for tab in ('Students', 'Lessons', 'Hostings'):
+    # Reset all CRM tabs to match the new schema (creates Packages & Payments tabs too)
+    for tab in ('Students', 'Lessons', 'Hostings', 'Packages', 'Payments'):
         await sheets_client.reset_tab_with_headers(creds, tab)
     count = await sheets_client.bulk_append(creds, 'Students', students)
-    return {'ok': True, 'imported': count, 'reset_tabs': ['Students', 'Lessons', 'Hostings']}
+    return {'ok': True, 'imported': count, 'reset_tabs': ['Students', 'Lessons', 'Hostings', 'Packages', 'Payments']}
 
 
 @api.post('/setup/reset-all-tabs')

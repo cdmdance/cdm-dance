@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../lib/api';
-import { PACKAGES, STYLES } from '../mock/mock';
+import { STYLES } from '../mock/mock';
 
 const DataContext = createContext(null);
 
@@ -8,6 +8,8 @@ export const DataProvider = ({ children }) => {
   const [students, setStudents] = useState([]);
   const [lessons, setLessons] = useState([]);
   const [hostings, setHostings] = useState([]);
+  const [packages, setPackages] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [gcalEvents, setGcalEvents] = useState([]);
   const [gcalStatus, setGcalStatus] = useState({ configured: false, connected: false, email: null });
   const [lastSync, setLastSync] = useState(null);
@@ -34,14 +36,18 @@ export const DataProvider = ({ children }) => {
     setLoadingData(true);
     setError(null);
     try {
-      const [dataRes, eventsRes] = await Promise.all([
+      const [dataRes, eventsRes, pkgRes, payRes] = await Promise.all([
         api.get('/data/all'),
         api.get('/calendar/events').catch(() => ({ data: [] })),
+        api.get('/packages').catch(() => ({ data: [] })),
+        api.get('/payments').catch(() => ({ data: [] })),
       ]);
       const d = dataRes.data || {};
       setStudents(normalizeStudents(d.students || []));
       setLessons(normalizeLessons(d.lessons || []));
       setHostings(normalizeHostings(d.hostings || []));
+      setPackages(normalizePackages(pkgRes.data || []));
+      setPayments(normalizePayments(payRes.data || []));
       setGcalEvents((eventsRes.data || []).map(e => ({
         id: e.id, summary: e.summary, date: e.date, time: e.time,
         location: e.location, source: 'gcal',
@@ -49,7 +55,6 @@ export const DataProvider = ({ children }) => {
       setLastSync(new Date().toISOString());
     } catch (e) {
       if (e.response?.status === 409) {
-        // Not connected to Google yet
         setError('not_connected');
       } else {
         setError(e.response?.data?.detail || 'Failed to load data');
@@ -62,13 +67,10 @@ export const DataProvider = ({ children }) => {
   useEffect(() => {
     (async () => {
       const s = await fetchStatus();
-      if (s.connected) {
-        await fetchData();
-      }
+      if (s.connected) await fetchData();
     })();
   }, [fetchStatus, fetchData]);
 
-  // Listen for OAuth popup completion
   useEffect(() => {
     const handler = async (event) => {
       if (event.data === 'gcal-connected') {
@@ -89,22 +91,17 @@ export const DataProvider = ({ children }) => {
   const disconnectGoogle = async () => {
     await api.post('/oauth/google/disconnect');
     await fetchStatus();
-    setStudents([]); setLessons([]); setHostings([]); setGcalEvents([]);
+    setStudents([]); setLessons([]); setHostings([]); setGcalEvents([]); setPackages([]); setPayments([]);
     showToast('Disconnected from Google');
   };
 
+  // Lessons
   const addLesson = async (lesson) => {
-    try {
-      const res = await api.post('/lessons', lesson);
-      setLessons(prev => [normalizeLesson(res.data), ...prev]);
-      showToast(gcalStatus.connected ? 'Lesson added & synced to Google Calendar' : 'Lesson added');
-      return res.data;
-    } catch (e) {
-      showToast('Failed to add lesson');
-      throw e;
-    }
+    const res = await api.post('/lessons', lesson);
+    setLessons(prev => [normalizeLesson(res.data), ...prev]);
+    showToast(gcalStatus.connected ? 'Lesson added & synced to Google Calendar' : 'Lesson added');
+    return res.data;
   };
-
   const updateLesson = async (id, patch) => {
     const existing = lessons.find(l => l.id === id);
     if (!existing) return;
@@ -112,13 +109,13 @@ export const DataProvider = ({ children }) => {
     setLessons(prev => prev.map(l => l.id === id ? normalizeLesson(res.data) : l));
     showToast('Lesson updated');
   };
-
   const deleteLesson = async (id) => {
     await api.delete(`/lessons/${id}`);
     setLessons(prev => prev.filter(l => l.id !== id));
     showToast('Lesson removed');
   };
 
+  // Hostings
   const addHosting = async (hosting) => {
     const res = await api.post('/hostings', hosting);
     setHostings(prev => [normalizeHosting(res.data), ...prev]);
@@ -126,12 +123,12 @@ export const DataProvider = ({ children }) => {
     return res.data;
   };
 
+  // Students
   const addStudent = async (student) => {
     const res = await api.post('/students', student);
     setStudents(prev => [...prev, normalizeStudent(res.data)]);
     showToast('Student added');
   };
-
   const updateStudent = async (id, patch) => {
     const existing = students.find(s => s.id === id);
     if (!existing) return;
@@ -139,20 +136,44 @@ export const DataProvider = ({ children }) => {
     setStudents(prev => prev.map(s => s.id === id ? normalizeStudent(res.data) : s));
   };
 
-  const completeSale = async ({ studentId, packageId, paid, method, style, notes }) => {
-    const pkg = PACKAGES.find(p => p.id === packageId);
-    const stu = students.find(s => s.id === studentId);
-    if (!pkg || !stu) return;
-    const newBalance = (stu.balance || 0) + (pkg.price - Number(paid || 0));
-    const newLessons = (stu.lessonsRemaining || 0) + pkg.lessons;
-    await updateStudent(studentId, {
-      lessonsRemaining: newLessons,
-      balance: newBalance,
-      package: pkg.name,
-      status: 'Active',
-      notes: `${stu.notes || ''}\n[${new Date().toISOString().slice(0,10)}] Sold ${pkg.name} via ${method}. Paid $${paid}. ${notes || ''}`.trim(),
-    });
-    showToast(`Sale completed: ${pkg.name}`);
+  // Packages
+  const addPackage = async (pkg) => {
+    const res = await api.post('/packages', pkg);
+    setPackages(prev => [...prev, normalizePackage(res.data)]);
+    showToast('Package created');
+    return res.data;
+  };
+  const updatePackage = async (id, patch) => {
+    const existing = packages.find(p => p.id === id);
+    if (!existing) return;
+    const res = await api.put(`/packages/${id}`, { ...existing, ...patch });
+    setPackages(prev => prev.map(p => p.id === id ? normalizePackage(res.data) : p));
+    showToast('Package updated');
+  };
+  const deletePackage = async (id) => {
+    await api.delete(`/packages/${id}`);
+    setPackages(prev => prev.filter(p => p.id !== id));
+    showToast('Package removed');
+  };
+
+  // Payments (POS sales)
+  const recordPayment = async (payment) => {
+    const res = await api.post('/payments', payment);
+    setPayments(prev => [normalizePayment(res.data.payment), ...prev]);
+    // Update student totals locally
+    if (res.data.student_updated && payment.studentId) {
+      setStudents(prev => prev.map(s => s.id === payment.studentId
+        ? { ...s, lessonsTotal: res.data.student_updated.lessonsTotal, totalPaid: res.data.student_updated.totalPaid }
+        : s));
+    }
+    showToast('Sale recorded');
+    return res.data.payment;
+  };
+  const deletePayment = async (id) => {
+    await api.delete(`/payments/${id}`);
+    setPayments(prev => prev.filter(p => p.id !== id));
+    await fetchData();
+    showToast('Payment removed');
   };
 
   const syncGoogleCalendar = async () => {
@@ -180,7 +201,6 @@ export const DataProvider = ({ children }) => {
         type: 'hosting', location: h.location, meta: h,
       });
     });
-    // Filter out gcal events that are already linked to a lesson/hosting
     const linkedIds = new Set([...lessons, ...hostings].map(x => x.gcalEventId).filter(Boolean));
     gcalEvents.forEach(g => {
       if (linkedIds.has(g.id)) return;
@@ -194,13 +214,15 @@ export const DataProvider = ({ children }) => {
 
   return (
     <DataContext.Provider value={{
-      students, lessons, hostings, gcalEvents,
-      packages: PACKAGES, styles: STYLES,
+      students, lessons, hostings, packages, payments, gcalEvents,
+      styles: STYLES,
       gcalStatus, gcalConnected: gcalStatus.connected,
       lastSync, loadingData, error,
       addLesson, updateLesson, deleteLesson,
       addHosting, addStudent, updateStudent,
-      completeSale, syncGoogleCalendar,
+      addPackage, updatePackage, deletePackage,
+      recordPayment, deletePayment,
+      syncGoogleCalendar,
       connectGoogle, disconnectGoogle, refreshData: fetchData,
       allCalendarEvents, toast, showToast,
     }}>
@@ -209,32 +231,46 @@ export const DataProvider = ({ children }) => {
   );
 };
 
-// --- Helpers: convert sheet string values to typed ----
 const toNum = (v) => {
   if (v === '' || v == null) return 0;
   const n = Number(String(v).replace(/[^0-9.\-]/g, ''));
   return isNaN(n) ? 0 : n;
 };
+const toBool = (v) => {
+  if (typeof v === 'boolean') return v;
+  const s = String(v || '').toLowerCase();
+  return s === 'true' || s === 'yes' || s === '1';
+};
 
 const normalizeStudent = (s) => ({
   ...s,
-  lessonsRemaining: toNum(s.lessonsRemaining),
-  lessonsCompleted: toNum(s.lessonsCompleted),
-  balance: toNum(s.balance),
+  lessons6mo: toNum(s.lessons6mo),
+  hostings6mo: toNum(s.hostings6mo),
+  lessonsTotal: toNum(s.lessonsTotal),
+  totalPaid: toNum(s.totalPaid),
 });
 const normalizeStudents = (arr) => arr.map(normalizeStudent);
 
-const normalizeLesson = (l) => ({
-  ...l,
-  price: toNum(l.price),
-});
+const normalizeLesson = (l) => ({ ...l, price: toNum(l.price) });
 const normalizeLessons = (arr) => arr.map(normalizeLesson);
 
-const normalizeHosting = (h) => ({
-  ...h,
-  income: toNum(h.income),
-});
+const normalizeHosting = (h) => ({ ...h, income: toNum(h.income) });
 const normalizeHostings = (arr) => arr.map(normalizeHosting);
+
+const normalizePackage = (p) => ({
+  ...p,
+  lessons: toNum(p.lessons),
+  price: toNum(p.price),
+  active: toBool(p.active),
+});
+const normalizePackages = (arr) => arr.map(normalizePackage);
+
+const normalizePayment = (p) => ({
+  ...p,
+  amount: toNum(p.amount),
+  lessons: toNum(p.lessons),
+});
+const normalizePayments = (arr) => arr.map(normalizePayment);
 
 export const useData = () => {
   const ctx = useContext(DataContext);

@@ -6,6 +6,7 @@ import { RefreshCw, LogOut, Cloud, CloudOff } from 'lucide-react';
 const TABS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'students', label: 'Students' },
+  { key: 'pos', label: 'POS' },
   { key: 'lessons', label: 'Lessons' },
   { key: 'hostings', label: 'Hostings' },
   { key: 'calendar', label: 'Calendar' },

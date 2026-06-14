@@ -165,6 +165,14 @@ const Students = () => {
                 <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Hostings (6mo)</div>
                 <div className="text-gold" style={{ fontFamily: 'Playfair Display, serif', fontSize: 18 }}>{s.hostings6mo || 0}</div>
               </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Lessons Bought</div>
+                <div style={{ fontFamily: 'Playfair Display, serif', fontSize: 18, color: 'var(--text)' }}>{s.lessonsTotal || 0}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Total Paid</div>
+                <div style={{ fontFamily: 'Playfair Display, serif', fontSize: 18, color: 'var(--success)' }}>${s.totalPaid || 0}</div>
+              </div>
             </div>
 
             <div style={{ borderTop: '1px solid var(--line)', paddingTop: 10, fontSize: 11, color: 'var(--text-dim)' }}>
@@ -256,7 +264,7 @@ const Students = () => {
                 </div>
               </div>
               <div className="divider-gold" />
-              <div className="grid-2col">
+              <div className="grid-2col" style={{ marginBottom: 14 }}>
                 <div>
                   <div className="stat-label">Lessons (6 months)</div>
                   <div className="stat-value">{detailStudent.lessons6mo || 0}</div>
@@ -264,6 +272,16 @@ const Students = () => {
                 <div>
                   <div className="stat-label">Hostings (6 months)</div>
                   <div className="stat-value">{detailStudent.hostings6mo || 0}</div>
+                </div>
+              </div>
+              <div className="grid-2col">
+                <div>
+                  <div className="stat-label">Lessons Bought</div>
+                  <div className="stat-value">{detailStudent.lessonsTotal || 0}</div>
+                </div>
+                <div>
+                  <div className="stat-label">Total Paid</div>
+                  <div className="stat-value" style={{ color: 'var(--success)' }}>${detailStudent.totalPaid || 0}</div>
                 </div>
               </div>
               {detailStudent.notes && (

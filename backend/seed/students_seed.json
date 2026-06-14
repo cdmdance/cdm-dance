@@ -8,7 +8,9 @@
     "hostings6mo": 26,
     "phone": "",
     "email": "",
-    "notes": "Core student. No 'Arleen' contact found in cmateu30 export \u2014 may be saved elsewhere; add phone manually."
+    "notes": "Core student. No 'Arleen' contact found in cmateu30 export \u2014 may be saved elsewhere; add phone manually.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Justine",
@@ -19,7 +21,9 @@
     "hostings6mo": 15,
     "phone": "",
     "email": "justinev1@hotmail.com",
-    "notes": "No phone in contacts \u2014 email only."
+    "notes": "No phone in contacts \u2014 email only.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Ester",
@@ -30,7 +34,9 @@
     "hostings6mo": 15,
     "phone": "(727) 723-5183",
     "email": "",
-    "notes": "Follow-up owed. Also 'Esther' spelling."
+    "notes": "Follow-up owed. Also 'Esther' spelling.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Deb Daly",
@@ -41,7 +47,9 @@
     "hostings6mo": 13,
     "phone": "(727) 439-4744",
     "email": "",
-    "notes": "Follow-up owed."
+    "notes": "Follow-up owed.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Alina Lyashenko",
@@ -52,7 +60,9 @@
     "hostings6mo": 0,
     "phone": "(917) 783-5573",
     "email": "",
-    "notes": "Private student. Separate 'Alina' (Arleen's daughter) excluded."
+    "notes": "Private student. Separate 'Alina' (Arleen's daughter) excluded.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Mandy",
@@ -63,7 +73,9 @@
     "hostings6mo": 22,
     "phone": "(813) 526-6005",
     "email": "",
-    "notes": "Contact: 'Mandy (hosting)'."
+    "notes": "Contact: 'Mandy (hosting)'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Nair",
@@ -74,7 +86,9 @@
     "hostings6mo": 13,
     "phone": "(727) 463-4912",
     "email": "",
-    "notes": "Contact: 'Nair Cabaret'."
+    "notes": "Contact: 'Nair Cabaret'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Kay C",
@@ -85,7 +99,9 @@
     "hostings6mo": 12,
     "phone": "(727) 421-6761",
     "email": "",
-    "notes": "Contact: 'Kay Coulter'. Same as 'Kay'."
+    "notes": "Contact: 'Kay Coulter'. Same as 'Kay'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Sheila",
@@ -96,7 +112,9 @@
     "hostings6mo": 12,
     "phone": "(727) 846-2592",
     "email": "",
-    "notes": "Contact: 'Sheila Cabaret'."
+    "notes": "Contact: 'Sheila Cabaret'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Pam",
@@ -107,7 +125,9 @@
     "hostings6mo": 9,
     "phone": "(941) 685-5761",
     "email": "",
-    "notes": "Used 'Pam(hosting)Sarasota&Cabaret'. A second 'Pam' exists: (941) 284-6454 \u2014 confirm."
+    "notes": "Used 'Pam(hosting)Sarasota&Cabaret'. A second 'Pam' exists: (941) 284-6454 \u2014 confirm.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Patricia Welter",
@@ -118,7 +138,9 @@
     "hostings6mo": 8,
     "phone": "(727) 946-2621",
     "email": "",
-    "notes": "The Patricia you host (Rhapsody/Cabaret). Cabaret cancel pending 6/8 call."
+    "notes": "The Patricia you host (Rhapsody/Cabaret). Cabaret cancel pending 6/8 call.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Bobby",
@@ -129,7 +151,9 @@
     "hostings6mo": 6,
     "phone": "(571) 291-1975",
     "email": "",
-    "notes": "Contact: 'Bobbi Thomas'."
+    "notes": "Contact: 'Bobbi Thomas'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Annie",
@@ -140,7 +164,9 @@
     "hostings6mo": 6,
     "phone": "",
     "email": "",
-    "notes": "No number yet."
+    "notes": "No number yet.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Tita",
@@ -151,7 +177,9 @@
     "hostings6mo": 3,
     "phone": "(727) 455-0224",
     "email": "",
-    "notes": "Contact: 'Tita Cabaret'."
+    "notes": "Contact: 'Tita Cabaret'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Yan",
@@ -162,7 +190,9 @@
     "hostings6mo": 3,
     "phone": "(813) 245-0245",
     "email": "",
-    "notes": "Contact: 'Yan rhapsody'."
+    "notes": "Contact: 'Yan rhapsody'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Vitaly",
@@ -173,7 +203,9 @@
     "hostings6mo": 2,
     "phone": "(561) 675-9158",
     "email": "",
-    "notes": "Hosted at Sara Dance Center (Sara = venue, not a person)."
+    "notes": "Hosted at Sara Dance Center (Sara = venue, not a person).",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Constance",
@@ -184,7 +216,9 @@
     "hostings6mo": 1,
     "phone": "(727) 512-7786",
     "email": "",
-    "notes": ""
+    "notes": "",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Lori",
@@ -195,7 +229,9 @@
     "hostings6mo": 1,
     "phone": "",
     "email": "",
-    "notes": "No number (confirmed)."
+    "notes": "No number (confirmed).",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Tess",
@@ -206,7 +242,9 @@
     "hostings6mo": 1,
     "phone": "(813) 480-0130",
     "email": "",
-    "notes": "Contact: 'Tess(Cabaret)'."
+    "notes": "Contact: 'Tess(Cabaret)'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Diane",
@@ -217,7 +255,9 @@
     "hostings6mo": 1,
     "phone": "(727) 710-3557",
     "email": "",
-    "notes": "Contact: 'Diane(Hosting) Cabaret!'."
+    "notes": "Contact: 'Diane(Hosting) Cabaret!'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Lynda",
@@ -228,7 +268,9 @@
     "hostings6mo": 1,
     "phone": "",
     "email": "",
-    "notes": "No number (confirmed)."
+    "notes": "No number (confirmed).",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Denise",
@@ -239,7 +281,9 @@
     "hostings6mo": 1,
     "phone": "(727) 204-2723",
     "email": "",
-    "notes": "Bradenton. Alt 'Denise Litz' (941) 773-1180 \u2014 confirm which."
+    "notes": "Bradenton. Alt 'Denise Litz' (941) 773-1180 \u2014 confirm which.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Eileen",
@@ -250,7 +294,9 @@
     "hostings6mo": 1,
     "phone": "(727) 773-6380",
     "email": "",
-    "notes": "Contact: 'Eileen(hosting)'."
+    "notes": "Contact: 'Eileen(hosting)'.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   },
   {
     "name": "Deb L",
@@ -261,6 +307,8 @@
     "hostings6mo": 1,
     "phone": "",
     "email": "",
-    "notes": "Distinct from Deb Daly. No number yet."
+    "notes": "Distinct from Deb Daly. No number yet.",
+    "lessonsTotal": 0,
+    "totalPaid": 0
   }
 ]

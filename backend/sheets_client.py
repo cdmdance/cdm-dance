@@ -19,15 +19,21 @@ logger = logging.getLogger(__name__)
 SHEET_ID = os.environ['GOOGLE_SHEET_ID']
 
 STUDENT_HEADERS = ['id', 'name', 'relationship', 'lastSeen', 'nextScheduled',
-                   'lessons6mo', 'hostings6mo', 'phone', 'email', 'notes']
+                   'lessons6mo', 'hostings6mo', 'phone', 'email',
+                   'lessonsTotal', 'totalPaid', 'notes']
 LESSON_HEADERS = ['id', 'studentId', 'studentName', 'date', 'time', 'style', 'location',
                   'status', 'price', 'notes', 'gcalEventId']
 HOSTING_HEADERS = ['id', 'date', 'location', 'names', 'income', 'notes', 'gcalEventId']
+PACKAGE_HEADERS = ['id', 'name', 'lessons', 'price', 'description', 'active']
+PAYMENT_HEADERS = ['id', 'date', 'studentId', 'studentName', 'packageId', 'packageName',
+                   'lessons', 'amount', 'method', 'notes']
 
 TAB_HEADERS = {
     'Students': STUDENT_HEADERS,
     'Lessons': LESSON_HEADERS,
     'Hostings': HOSTING_HEADERS,
+    'Packages': PACKAGE_HEADERS,
+    'Payments': PAYMENT_HEADERS,
 }
 
 

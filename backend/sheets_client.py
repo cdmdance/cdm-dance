@@ -190,6 +190,30 @@ async def clear_tab_keep_header(creds, tab: str) -> None:
         spreadsheetId=SHEET_ID, range=f"{tab}!A2:{last_col}").execute())
 
 
+async def reset_tab_with_headers(creds, tab: str) -> None:
+    """Wipe ALL content of a tab and write our canonical headers as row 1.
+
+    Use this when the existing sheet has incompatible column names from a
+    previous version of the app.
+    """
+    svc = _service(creds)
+    # Make sure tab exists
+    await ensure_tabs(creds)
+    headers = TAB_HEADERS.get(tab)
+    if not headers:
+        return
+    # Clear everything
+    await _to_thread(lambda: svc.spreadsheets().values().clear(
+        spreadsheetId=SHEET_ID, range=f"{tab}!A:ZZ").execute())
+    # Write our canonical headers
+    last_col = chr(ord('A') + len(headers) - 1)
+    await _to_thread(lambda: svc.spreadsheets().values().update(
+        spreadsheetId=SHEET_ID,
+        range=f"{tab}!A1:{last_col}1",
+        valueInputOption='RAW',
+        body={'values': [headers]}).execute())
+
+
 async def bulk_append(creds, tab: str, records: list[dict]) -> int:
     """Append multiple records at once, assigning IDs."""
     if not records:

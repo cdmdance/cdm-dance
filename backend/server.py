@@ -289,18 +289,32 @@ async def setup_ensure_tabs(user=Depends(auth_mod.require_staff)):
 
 @api.post('/setup/import-students')
 async def import_students(user=Depends(auth_mod.require_staff)):
-    """Wipe Students tab and seed with the real data from seed/students_seed.json."""
+    """Reset Students/Lessons/Hostings tabs (wipe everything from old schema)
+    and seed Students with the real data from the uploaded file."""
     creds = await _require_creds()
-    await sheets_client.ensure_tabs(creds)
     seed_path = ROOT_DIR / 'seed' / 'students_seed.json'
     if not seed_path.exists():
         raise HTTPException(status_code=404, detail='Seed file not found')
     import json
     with open(seed_path) as f:
         students = json.load(f)
-    await sheets_client.clear_tab_keep_header(creds, 'Students')
+    # Reset all three CRM tabs to match the new schema
+    for tab in ('Students', 'Lessons', 'Hostings'):
+        await sheets_client.reset_tab_with_headers(creds, tab)
     count = await sheets_client.bulk_append(creds, 'Students', students)
-    return {'ok': True, 'imported': count}
+    return {'ok': True, 'imported': count, 'reset_tabs': ['Students', 'Lessons', 'Hostings']}
+
+
+@api.post('/setup/reset-all-tabs')
+async def reset_all_tabs(user=Depends(auth_mod.require_staff)):
+    """Wipe Students, Lessons, Hostings tabs completely and write canonical headers.
+
+    Use this when the sheet has incompatible columns from a previous app version.
+    """
+    creds = await _require_creds()
+    for tab in ('Students', 'Lessons', 'Hostings'):
+        await sheets_client.reset_tab_with_headers(creds, tab)
+    return {'ok': True, 'reset': ['Students', 'Lessons', 'Hostings']}
 
 
 @api.post('/setup/clear-tab')

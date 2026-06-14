@@ -14,13 +14,9 @@ venv/
 env/
 .venv/
 
-# Environment files (NEVER commit secrets)
-.env
+# Local-only env overrides (real .env files are managed by deployment)
 .env.local
-.env.production
 .env.*.local
-backend/.env
-frontend/.env
 
 # Build outputs
 build/
@@ -35,7 +31,7 @@ out/
 *.swo
 .DS_Store
 
-# OAuth tokens / sensitive
+# OAuth tokens / sensitive credential files
 backend/credentials.json
 backend/token.json
 *.pem

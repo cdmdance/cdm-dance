@@ -10,11 +10,16 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Load .env BEFORE importing local modules so they can read env at module level
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query
 from fastapi.responses import RedirectResponse, HTMLResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
 from pydantic import BaseModel
 
 import auth as auth_mod
@@ -23,9 +28,6 @@ import sheets_client
 import calendar_client
 import calendar_income
 
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

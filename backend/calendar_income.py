@@ -31,11 +31,53 @@ HOSTING_RATE = int(os.environ.get('HOSTING_RATE_PER_PERSON', '80'))
 LESSON_RATE_DEFAULT = int(os.environ.get('LESSON_RATE_DEFAULT', '75'))
 
 _STUDENT_RATES_RAW = os.environ.get('STUDENT_RATES', '')
+_HOST_RATES_RAW = os.environ.get('HOST_RATES', '')
+_NAME_ALIASES_RAW = os.environ.get('NAME_ALIASES', '')
 try:
     import json as _json
     STUDENT_RATES = _json.loads(_STUDENT_RATES_RAW) if _STUDENT_RATES_RAW else {}
+    HOST_RATES = _json.loads(_HOST_RATES_RAW) if _HOST_RATES_RAW else {}
+    NAME_ALIASES = _json.loads(_NAME_ALIASES_RAW) if _NAME_ALIASES_RAW else {}
 except Exception:
     STUDENT_RATES = {}
+    HOST_RATES = {}
+    NAME_ALIASES = {}
+
+
+def canonical_name(name: str) -> str:
+    """Apply NAME_ALIASES mapping (case-insensitive) to merge name variants."""
+    if not name:
+        return name
+    key = name.strip()
+    # exact match first
+    if key in NAME_ALIASES:
+        return NAME_ALIASES[key]
+    # case-insensitive match
+    lower = key.lower()
+    for alias, canonical in NAME_ALIASES.items():
+        if alias.lower() == lower:
+            return canonical
+    return key
+
+
+def host_rate_for(name: str) -> int:
+    """Per-host rate override, falling back to HOSTING_RATE default."""
+    canonical = canonical_name(name)
+    if canonical in HOST_RATES:
+        return HOST_RATES[canonical]
+    if name in HOST_RATES:
+        return HOST_RATES[name]
+    return HOSTING_RATE
+
+
+def lesson_rate_for(name: str) -> int:
+    """Per-student lesson rate override, falling back to LESSON_RATE_DEFAULT."""
+    canonical = canonical_name(name)
+    if canonical in STUDENT_RATES:
+        return STUDENT_RATES[canonical]
+    if name in STUDENT_RATES:
+        return STUDENT_RATES[name]
+    return LESSON_RATE_DEFAULT
 
 # Known location/venue keywords that should NOT be counted as names
 LOCATION_KEYWORDS = [
@@ -150,45 +192,50 @@ def classify_event(title: str, known_names: list[str] | None = None) -> dict:
     # Classification
     if has_hosting:
         if not names:
-            # "Hosting" word but no parsed names — couldn't determine attendees
             return {'type': 'hosting', 'location': location, 'names': [],
                     'student': '', 'income': 0}
-        return {'type': 'hosting', 'location': location, 'names': names,
-                'student': '', 'income': HOSTING_RATE * len(names)}
+        canonical_names = [canonical_name(n) for n in names]
+        income = sum(host_rate_for(n) for n in canonical_names)
+        return {'type': 'hosting', 'location': location, 'names': canonical_names,
+                'student': '', 'income': income}
 
     if has_cabaret and len(names) >= 1 and not has_lesson:
-        # "Cabaret <names>" implies hosting
-        return {'type': 'hosting', 'location': 'Cabaret', 'names': names,
-                'student': '', 'income': HOSTING_RATE * len(names)}
+        canonical_names = [canonical_name(n) for n in names]
+        income = sum(host_rate_for(n) for n in canonical_names)
+        return {'type': 'hosting', 'location': 'Cabaret', 'names': canonical_names,
+                'student': '', 'income': income}
 
     if has_lesson:
-        student = names[0] if names else (detected_known[0] if detected_known else '')
-        if not student:
+        if not names and not detected_known:
             return {'type': 'lesson', 'location': '', 'names': [], 'student': '', 'income': 0}
-        # If we got multiple students (e.g. "Maukie & Balina Lesson"), count each
-        if len(names) > 1:
-            total = sum(STUDENT_RATES.get(n, LESSON_RATE_DEFAULT) for n in names)
-            return {'type': 'lesson', 'location': '', 'names': names,
-                    'student': ', '.join(names), 'income': total}
-        rate = STUDENT_RATES.get(student, LESSON_RATE_DEFAULT)
+        # If multiple students in one lesson, count each
+        if names and len(names) > 1:
+            canonical_names = [canonical_name(n) for n in names]
+            total = sum(lesson_rate_for(n) for n in canonical_names)
+            return {'type': 'lesson', 'location': '', 'names': canonical_names,
+                    'student': ', '.join(canonical_names), 'income': total}
+        raw_student = names[0] if names else detected_known[0]
+        student = canonical_name(raw_student)
+        rate = lesson_rate_for(student)
         return {'type': 'lesson', 'location': '', 'names': [],
                 'student': student, 'income': rate}
 
     # Title that is just a known student name => lesson
     if known_names:
-        # Strip whitespace, check exact match (case-insensitive)
         norm_title = _norm(title)
         for kn in known_names:
             if _norm(kn) == norm_title:
-                rate = STUDENT_RATES.get(kn, LESSON_RATE_DEFAULT)
+                canonical = canonical_name(kn)
                 return {'type': 'lesson', 'location': '', 'names': [],
-                        'student': kn, 'income': rate}
+                        'student': canonical, 'income': lesson_rate_for(canonical)}
 
     # "X Hosting Event" pattern
     if 'hosting event' in low:
         if detected_known:
-            return {'type': 'hosting', 'location': '', 'names': detected_known,
-                    'student': '', 'income': HOSTING_RATE * len(detected_known)}
+            canonical_names = [canonical_name(n) for n in detected_known]
+            income = sum(host_rate_for(n) for n in canonical_names)
+            return {'type': 'hosting', 'location': '', 'names': canonical_names,
+                    'student': '', 'income': income}
 
     return {'type': 'other', 'location': '', 'names': [], 'student': '', 'income': 0}
 
@@ -245,8 +292,9 @@ def analyze_events(events: list[dict], today_iso: str | None = None,
                 projected_hostings_count += 1
                 projected_by_month[month_key] += info['income']
             for name in info['names']:
+                rate = host_rate_for(name)
                 by_host[name]['hostings_count'] += 1
-                by_host[name]['hostings_total'] += HOSTING_RATE
+                by_host[name]['hostings_total'] += rate
         elif info['type'] == 'lesson':
             if is_past:
                 earned_total += info['income']

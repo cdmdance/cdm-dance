@@ -16,7 +16,7 @@ from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
-SHEET_ID = os.environ.get('GOOGLE_SHEET_ID', '1RDgxYt5NcrqwME5LT9vrBg29pGi3ue4yFNPDXA02u8w')
+SHEET_ID = os.environ['GOOGLE_SHEET_ID']
 
 STUDENT_HEADERS = ['id', 'name', 'relationship', 'lastSeen', 'nextScheduled',
                    'lessons6mo', 'hostings6mo', 'phone', 'email', 'notes']

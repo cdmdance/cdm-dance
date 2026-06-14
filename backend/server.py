@@ -1,89 +1,309 @@
-from fastapi import FastAPI, APIRouter
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+"""CDM Dance CRM - FastAPI Backend.
+
+Stack:
+- Staff auth via password + JWT
+- Google OAuth (Sheets + Calendar) for cdmdanceservices@gmail.com
+- Sheets are source of truth; Calendar mirrors Lessons & Hostings
+"""
 import os
 import logging
+from datetime import datetime
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
+
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query
+from fastapi.responses import RedirectResponse, HTMLResponse
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+import auth as auth_mod
+import google_oauth
+import sheets_client
+import calendar_client
 
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Mongo
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ.get('DB_NAME', 'cdm_crm')]
 
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+app = FastAPI(title='CDM Dance CRM')
+api = APIRouter(prefix='/api')
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+# --------- Models ---------
+class LoginIn(BaseModel):
+    password: str
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+class StudentIn(BaseModel):
+    id: str | None = None
+    name: str
+    email: str | None = ''
+    phone: str | None = ''
+    level: str | None = 'Beginner'
+    primaryStyle: str | None = ''
+    package: str | None = ''
+    lessonsRemaining: int | float | None = 0
+    lessonsCompleted: int | float | None = 0
+    balance: int | float | None = 0
+    status: str | None = 'Active'
+    joinDate: str | None = ''
+    notes: str | None = ''
+
+
+class LessonIn(BaseModel):
+    id: str | None = None
+    studentId: str | None = ''
+    studentName: str | None = ''
+    date: str
+    time: str | None = ''
+    style: str | None = ''
+    location: str | None = ''
+    status: str | None = 'Scheduled'
+    price: int | float | None = 0
+    notes: str | None = ''
+    gcalEventId: str | None = ''
+
+
+class HostingIn(BaseModel):
+    id: str | None = None
+    date: str
+    location: str | None = ''
+    names: str | None = ''
+    income: int | float | None = 0
+    notes: str | None = ''
+    gcalEventId: str | None = ''
+
+
+# --------- Auth routes ---------
+@api.post('/auth/login')
+async def login(body: LoginIn):
+    if not auth_mod.verify_password(body.password):
+        raise HTTPException(status_code=401, detail='Incorrect password')
+    return auth_mod.create_token()
+
+
+@api.get('/auth/me')
+async def me(user=Depends(auth_mod.require_staff)):
+    return {'role': user.get('role'), 'authed': True}
+
+
+# --------- Google OAuth routes ---------
+@api.get('/oauth/google/status')
+async def oauth_status(user=Depends(auth_mod.require_staff)):
+    return await google_oauth.get_status(db)
+
+
+@api.get('/oauth/google/login')
+async def oauth_login():
+    """Browser-initiated OAuth start. Returns a 302 redirect to Google."""
+    if not google_oauth.is_configured():
+        return HTMLResponse(
+            "<h2>Google OAuth not configured</h2><p>GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and PUBLIC_BACKEND_URL must be set.</p>",
+            status_code=500,
+        )
+    url, state = google_oauth.build_auth_url()
+    await db.oauth_states.insert_one({'state': state, 'created_at': datetime.utcnow()})
+    return RedirectResponse(url)
+
+
+@api.get('/oauth/google/callback')
+async def oauth_callback(code: str = Query(...), state: str | None = Query(None), error: str | None = Query(None)):
+    if error:
+        return HTMLResponse(f"<h2>Google sign-in cancelled</h2><p>{error}</p>")
+    try:
+        info = await google_oauth.handle_callback(db, code, state)
+    except Exception as e:
+        logger.exception('OAuth callback failed')
+        return HTMLResponse(f"<h2>Connection failed</h2><pre>{e}</pre>")
+    try:
+        creds = await google_oauth.get_credentials(db)
+        if creds:
+            await sheets_client.ensure_tabs(creds)
+    except Exception as e:
+        logger.warning(f'Could not ensure tabs after connect: {e}')
+    return HTMLResponse(f"""
+        <html><body style='font-family: -apple-system, sans-serif; background:#0a0a0c; color:#ece6d5; padding:40px; text-align:center;'>
+        <h1 style='color:#c8a55b; font-family: Georgia, serif;'>Connected</h1>
+        <p>Signed in as <b>{info.get('email')}</b></p>
+        <p style='color:#a59f8e; font-size:13px;'>You can close this window. The CRM is now connected to Google Sheets &amp; Calendar.</p>
+        <script>setTimeout(()=>{{ if(window.opener){{ window.opener.postMessage('gcal-connected','*'); window.close(); }} else {{ window.location.href = '/'; }} }}, 1500);</script>
+        </body></html>
+    """)
+
+
+@api.post('/oauth/google/disconnect')
+async def oauth_disconnect(user=Depends(auth_mod.require_staff)):
+    await google_oauth.disconnect(db)
+    return {'ok': True}
+
+
+# --------- Data routes ---------
+async def _require_creds():
+    creds = await google_oauth.get_credentials(db)
+    if not creds:
+        raise HTTPException(status_code=409, detail='Google not connected. Connect via /api/oauth/google/login')
+    return creds
+
+
+@api.get('/data/all')
+async def get_all_data(user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    return await sheets_client.read_all(creds)
+
+
+@api.post('/students')
+async def add_student(body: StudentIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    rec = body.model_dump()
+    if not rec.get('joinDate'):
+        rec['joinDate'] = datetime.utcnow().date().isoformat()
+    return await sheets_client.append_row(creds, 'Students', rec)
+
+
+@api.put('/students/{student_id}')
+async def update_student(student_id: str, body: StudentIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    res = await sheets_client.update_row_by_id(creds, 'Students', student_id, patch)
+    if not res:
+        raise HTTPException(status_code=404, detail='Student not found')
+    return res
+
+
+@api.post('/lessons')
+async def add_lesson(body: LessonIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    rec = body.model_dump()
+    title = f"Lesson: {rec.get('studentName') or rec.get('studentId')} - {rec.get('style', '')}"
+    gcal_id = await calendar_client.create_event(
+        creds, title=title, date=rec['date'], time=rec.get('time') or None,
+        location=rec.get('location', ''), description=rec.get('notes', ''),
+        duration_minutes=60,
+    )
+    rec['gcalEventId'] = gcal_id or ''
+    return await sheets_client.append_row(creds, 'Lessons', rec)
+
+
+@api.put('/lessons/{lesson_id}')
+async def update_lesson(lesson_id: str, body: LessonIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    all_lessons = await sheets_client.read_tab(creds, 'Lessons')
+    existing = next((l for l in all_lessons if l.get('id') == lesson_id), None)
+    if existing and existing.get('gcalEventId'):
+        title = f"Lesson: {patch.get('studentName', existing.get('studentName'))} - {patch.get('style', existing.get('style', ''))}"
+        await calendar_client.update_event(
+            creds, existing['gcalEventId'], title=title,
+            date=patch.get('date', existing['date']),
+            time=patch.get('time', existing.get('time')) or None,
+            location=patch.get('location', existing.get('location', '')),
+            description=patch.get('notes', existing.get('notes', '')),
+        )
+    res = await sheets_client.update_row_by_id(creds, 'Lessons', lesson_id, patch)
+    if not res:
+        raise HTTPException(status_code=404, detail='Lesson not found')
+    return res
+
+
+@api.delete('/lessons/{lesson_id}')
+async def delete_lesson(lesson_id: str, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    all_lessons = await sheets_client.read_tab(creds, 'Lessons')
+    for l in all_lessons:
+        if l.get('id') == lesson_id and l.get('gcalEventId'):
+            await calendar_client.delete_event(creds, l['gcalEventId'])
+            break
+    ok = await sheets_client.delete_row_by_id(creds, 'Lessons', lesson_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail='Lesson not found')
+    return {'ok': True}
+
+
+@api.post('/hostings')
+async def add_hosting(body: HostingIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    rec = body.model_dump()
+    title = f"Hosting: {rec.get('location', '')}"
+    desc = f"Names: {rec.get('names', '')}\nIncome: ${rec.get('income', 0)}\n{rec.get('notes', '')}"
+    gcal_id = await calendar_client.create_event(
+        creds, title=title, date=rec['date'], time='20:00',
+        location=rec.get('location', ''), description=desc,
+        duration_minutes=180,
+    )
+    rec['gcalEventId'] = gcal_id or ''
+    return await sheets_client.append_row(creds, 'Hostings', rec)
+
+
+@api.put('/hostings/{hosting_id}')
+async def update_hosting(hosting_id: str, body: HostingIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    res = await sheets_client.update_row_by_id(creds, 'Hostings', hosting_id, patch)
+    if not res:
+        raise HTTPException(status_code=404, detail='Hosting not found')
+    return res
+
+
+@api.delete('/hostings/{hosting_id}')
+async def delete_hosting(hosting_id: str, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    all_h = await sheets_client.read_tab(creds, 'Hostings')
+    for h in all_h:
+        if h.get('id') == hosting_id and h.get('gcalEventId'):
+            await calendar_client.delete_event(creds, h['gcalEventId'])
+            break
+    ok = await sheets_client.delete_row_by_id(creds, 'Hostings', hosting_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail='Hosting not found')
+    return {'ok': True}
+
+
+# --------- Calendar routes ---------
+@api.get('/calendar/events')
+async def get_calendar_events(user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    return await calendar_client.list_events(creds)
+
+
+@api.post('/calendar/sync')
+async def calendar_sync(user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    events = await calendar_client.list_events(creds)
+    return {'synced_at': datetime.utcnow().isoformat(), 'count': len(events), 'events': events}
+
+
+@api.post('/setup/ensure-tabs')
+async def setup_ensure_tabs(user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    await sheets_client.ensure_tabs(creds)
+    return {'ok': True}
+
+
+@api.get('/')
 async def root():
-    return {"message": "Hello World"}
+    return {'app': 'CDM Dance CRM', 'status': 'ok'}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
-app.include_router(api_router)
+app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=['*'],
+    allow_methods=['*'],
+    allow_headers=['*'],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
-@app.on_event("shutdown")
+@app.on_event('shutdown')
 async def shutdown_db_client():
     client.close()

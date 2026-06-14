@@ -1,31 +1,41 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import api, { getToken, setToken, clearToken } from '../lib/api';
 
 const AuthContext = createContext(null);
-
-const DEFAULT_PASSWORD = 'cdm2025';
-const AUTH_KEY = 'cdm_crm_auth';
 
 export const AuthProvider = ({ children }) => {
   const [authed, setAuthed] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const v = localStorage.getItem(AUTH_KEY);
-    if (v === 'ok') setAuthed(true);
-    setLoading(false);
+    const init = async () => {
+      const t = getToken();
+      if (!t) { setLoading(false); return; }
+      try {
+        await api.get('/auth/me');
+        setAuthed(true);
+      } catch (e) {
+        clearToken();
+      } finally {
+        setLoading(false);
+      }
+    };
+    init();
   }, []);
 
-  const login = (password) => {
-    if (password === DEFAULT_PASSWORD) {
-      localStorage.setItem(AUTH_KEY, 'ok');
+  const login = async (password) => {
+    try {
+      const res = await api.post('/auth/login', { password });
+      setToken(res.data.token);
       setAuthed(true);
       return { success: true };
+    } catch (e) {
+      return { success: false, error: e.response?.data?.detail || 'Login failed' };
     }
-    return { success: false, error: 'Incorrect password' };
   };
 
   const logout = () => {
-    localStorage.removeItem(AUTH_KEY);
+    clearToken();
     setAuthed(false);
   };
 

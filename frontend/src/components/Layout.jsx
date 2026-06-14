@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import { RefreshCw, LogOut } from 'lucide-react';
+import { RefreshCw, LogOut, Cloud, CloudOff } from 'lucide-react';
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -15,10 +15,13 @@ const TABS = [
 
 const Layout = ({ active, onTabChange, children }) => {
   const { logout } = useAuth();
-  const { syncGoogleCalendar, gcalConnected, lastSync, toast } = useData();
+  const { syncGoogleCalendar, gcalStatus, lastSync, toast, disconnectGoogle, loadingData } = useData();
+  const connected = gcalStatus?.connected;
 
   const syncLabel = (() => {
-    if (!lastSync) return 'Not synced';
+    if (!connected) return 'Not connected';
+    if (loadingData) return 'Syncing...';
+    if (!lastSync) return 'Connected';
     const d = new Date(lastSync);
     return 'Synced ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   })();
@@ -31,14 +34,25 @@ const Layout = ({ active, onTabChange, children }) => {
           <div className="cdm-logo-title">Dance CRM</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-dim)' }}>
-            <span className="sync-dot" style={{ background: gcalConnected ? 'var(--gold)' : 'var(--muted)' }} />
-            <span>{gcalConnected ? syncLabel : 'GCal disconnected'}</span>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-dim)' }}
+            title={connected ? `Connected as ${gcalStatus.email || ''}` : 'Not connected to Google'}
+          >
+            {connected ? <Cloud size={14} color="var(--gold)" /> : <CloudOff size={14} color="var(--muted)" />}
+            <span>{syncLabel}</span>
           </div>
-          <button className="btn-ghost" onClick={syncGoogleCalendar}>
-            <RefreshCw size={13} style={{ marginRight: 6, verticalAlign: '-2px' }} />
-            Sync
-          </button>
+          {connected && (
+            <>
+              <button className="btn-ghost" onClick={syncGoogleCalendar}>
+                <RefreshCw size={13} style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                Sync
+              </button>
+              <button className="btn-ghost" onClick={disconnectGoogle} title="Disconnect Google">
+                <CloudOff size={13} style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                Disconnect
+              </button>
+            </>
+          )}
           <button className="btn-icon" onClick={logout} title="Logout">
             <LogOut size={14} />
           </button>
@@ -51,6 +65,8 @@ const Layout = ({ active, onTabChange, children }) => {
             key={tab.key}
             className={`cdm-tab ${active === tab.key ? 'active' : ''}`}
             onClick={() => onTabChange(tab.key)}
+            disabled={!connected}
+            style={!connected ? { opacity: 0.4, cursor: 'not-allowed' } : {}}
           >
             {tab.label}
           </button>

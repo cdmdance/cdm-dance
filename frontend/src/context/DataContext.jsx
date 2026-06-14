@@ -1,141 +1,240 @@
-import React, { createContext, useContext, useState, useMemo } from 'react';
-import { STUDENTS, LESSONS, HOSTINGS, GCAL_EXTERNAL, PACKAGES, STYLES } from '../mock/mock';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import api from '../lib/api';
+import { PACKAGES, STYLES } from '../mock/mock';
 
 const DataContext = createContext(null);
 
 export const DataProvider = ({ children }) => {
-  const [students, setStudents] = useState(STUDENTS);
-  const [lessons, setLessons] = useState(LESSONS);
-  const [hostings, setHostings] = useState(HOSTINGS);
-  const [gcalExternal, setGcalExternal] = useState(GCAL_EXTERNAL);
-  const [gcalConnected, setGcalConnected] = useState(true); // mocked as connected
-  const [lastSync, setLastSync] = useState(new Date().toISOString());
+  const [students, setStudents] = useState([]);
+  const [lessons, setLessons] = useState([]);
+  const [hostings, setHostings] = useState([]);
+  const [gcalEvents, setGcalEvents] = useState([]);
+  const [gcalStatus, setGcalStatus] = useState({ configured: false, connected: false, email: null });
+  const [lastSync, setLastSync] = useState(null);
+  const [loadingData, setLoadingData] = useState(false);
+  const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
 
   const showToast = (msg) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+    setTimeout(() => setToast(null), 2800);
   };
 
-  const addLesson = (lesson) => {
-    const id = 'l' + Date.now();
-    const stu = students.find(s => s.id === lesson.studentId);
-    const newLesson = {
-      ...lesson,
-      id,
-      studentName: stu ? stu.name : lesson.studentName,
-      gcalEventId: gcalConnected ? 'gc_evt_new_' + id : null,
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await api.get('/oauth/google/status');
+      setGcalStatus(res.data);
+      return res.data;
+    } catch (e) {
+      return { configured: false, connected: false };
+    }
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    setLoadingData(true);
+    setError(null);
+    try {
+      const [dataRes, eventsRes] = await Promise.all([
+        api.get('/data/all'),
+        api.get('/calendar/events').catch(() => ({ data: [] })),
+      ]);
+      const d = dataRes.data || {};
+      setStudents(normalizeStudents(d.students || []));
+      setLessons(normalizeLessons(d.lessons || []));
+      setHostings(normalizeHostings(d.hostings || []));
+      setGcalEvents((eventsRes.data || []).map(e => ({
+        id: e.id, summary: e.summary, date: e.date, time: e.time,
+        location: e.location, source: 'gcal',
+      })));
+      setLastSync(new Date().toISOString());
+    } catch (e) {
+      if (e.response?.status === 409) {
+        // Not connected to Google yet
+        setError('not_connected');
+      } else {
+        setError(e.response?.data?.detail || 'Failed to load data');
+      }
+    } finally {
+      setLoadingData(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const s = await fetchStatus();
+      if (s.connected) {
+        await fetchData();
+      }
+    })();
+  }, [fetchStatus, fetchData]);
+
+  // Listen for OAuth popup completion
+  useEffect(() => {
+    const handler = async (event) => {
+      if (event.data === 'gcal-connected') {
+        await fetchStatus();
+        await fetchData();
+        showToast('Google connected!');
+      }
     };
-    setLessons(prev => [newLesson, ...prev]);
-    showToast(gcalConnected ? 'Lesson added & synced to Google Calendar' : 'Lesson added');
-    return newLesson;
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [fetchStatus, fetchData]);
+
+  const connectGoogle = () => {
+    const url = `${process.env.REACT_APP_BACKEND_URL}/api/oauth/google/login`;
+    window.open(url, 'gcal_oauth', 'width=520,height=680');
   };
 
-  const updateLesson = (id, patch) => {
-    setLessons(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+  const disconnectGoogle = async () => {
+    await api.post('/oauth/google/disconnect');
+    await fetchStatus();
+    setStudents([]); setLessons([]); setHostings([]); setGcalEvents([]);
+    showToast('Disconnected from Google');
+  };
+
+  const addLesson = async (lesson) => {
+    try {
+      const res = await api.post('/lessons', lesson);
+      setLessons(prev => [normalizeLesson(res.data), ...prev]);
+      showToast(gcalStatus.connected ? 'Lesson added & synced to Google Calendar' : 'Lesson added');
+      return res.data;
+    } catch (e) {
+      showToast('Failed to add lesson');
+      throw e;
+    }
+  };
+
+  const updateLesson = async (id, patch) => {
+    const existing = lessons.find(l => l.id === id);
+    if (!existing) return;
+    const res = await api.put(`/lessons/${id}`, { ...existing, ...patch });
+    setLessons(prev => prev.map(l => l.id === id ? normalizeLesson(res.data) : l));
     showToast('Lesson updated');
   };
 
-  const deleteLesson = (id) => {
+  const deleteLesson = async (id) => {
+    await api.delete(`/lessons/${id}`);
     setLessons(prev => prev.filter(l => l.id !== id));
     showToast('Lesson removed');
   };
 
-  const addHosting = (hosting) => {
-    const id = 'h' + Date.now();
-    const newHosting = { ...hosting, id, gcalEventId: gcalConnected ? 'gc_evt_h_' + id : null };
-    setHostings(prev => [newHosting, ...prev]);
-    showToast(gcalConnected ? 'Hosting added & synced to Google Calendar' : 'Hosting added');
-    return newHosting;
+  const addHosting = async (hosting) => {
+    const res = await api.post('/hostings', hosting);
+    setHostings(prev => [normalizeHosting(res.data), ...prev]);
+    showToast(gcalStatus.connected ? 'Hosting added & synced to Google Calendar' : 'Hosting added');
+    return res.data;
   };
 
-  const addStudent = (student) => {
-    const id = 's' + Date.now();
-    setStudents(prev => [...prev, { ...student, id, lessonsCompleted: 0 }]);
+  const addStudent = async (student) => {
+    const res = await api.post('/students', student);
+    setStudents(prev => [...prev, normalizeStudent(res.data)]);
     showToast('Student added');
   };
 
-  const updateStudent = (id, patch) => {
-    setStudents(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
-    showToast('Student updated');
+  const updateStudent = async (id, patch) => {
+    const existing = students.find(s => s.id === id);
+    if (!existing) return;
+    const res = await api.put(`/students/${id}`, { ...existing, ...patch });
+    setStudents(prev => prev.map(s => s.id === id ? normalizeStudent(res.data) : s));
   };
 
-  const completeSale = ({ studentId, packageId, paid, method, style, notes }) => {
+  const completeSale = async ({ studentId, packageId, paid, method, style, notes }) => {
     const pkg = PACKAGES.find(p => p.id === packageId);
-    if (!pkg) return;
-    setStudents(prev => prev.map(s => {
-      if (s.id !== studentId) return s;
-      const newBalance = (s.balance || 0) + (pkg.price - paid);
-      return {
-        ...s,
-        lessonsRemaining: (s.lessonsRemaining || 0) + pkg.lessons,
-        balance: newBalance,
-        package: pkg.name,
-        status: 'Active',
-      };
-    }));
+    const stu = students.find(s => s.id === studentId);
+    if (!pkg || !stu) return;
+    const newBalance = (stu.balance || 0) + (pkg.price - Number(paid || 0));
+    const newLessons = (stu.lessonsRemaining || 0) + pkg.lessons;
+    await updateStudent(studentId, {
+      lessonsRemaining: newLessons,
+      balance: newBalance,
+      package: pkg.name,
+      status: 'Active',
+      notes: `${stu.notes || ''}\n[${new Date().toISOString().slice(0,10)}] Sold ${pkg.name} via ${method}. Paid $${paid}. ${notes || ''}`.trim(),
+    });
     showToast(`Sale completed: ${pkg.name}`);
   };
 
-  const syncGoogleCalendar = () => {
-    setLastSync(new Date().toISOString());
-    showToast('Google Calendar synced');
+  const syncGoogleCalendar = async () => {
+    try {
+      await fetchData();
+      showToast('Synced with Google Calendar');
+    } catch (e) {
+      showToast('Sync failed');
+    }
   };
 
-  // Derived calendar events (lessons + hostings + external gcal)
   const allCalendarEvents = useMemo(() => {
     const evts = [];
     lessons.forEach(l => {
       evts.push({
-        id: l.id,
-        date: l.date,
-        time: l.time,
-        title: `${l.studentName} - ${l.style}`,
-        type: 'lesson',
-        status: l.status,
-        location: l.location,
-        meta: l,
+        id: l.id, date: l.date, time: l.time,
+        title: `${l.studentName || 'Student'} - ${l.style || 'Lesson'}`,
+        type: 'lesson', status: l.status, location: l.location, meta: l,
       });
     });
     hostings.forEach(h => {
       evts.push({
-        id: h.id,
-        date: h.date,
-        time: '20:00',
+        id: h.id, date: h.date, time: '20:00',
         title: `Hosting: ${h.location}`,
-        type: 'hosting',
-        location: h.location,
-        meta: h,
+        type: 'hosting', location: h.location, meta: h,
       });
     });
-    gcalExternal.forEach(g => {
+    // Filter out gcal events that are already linked to a lesson/hosting
+    const linkedIds = new Set([...lessons, ...hostings].map(x => x.gcalEventId).filter(Boolean));
+    gcalEvents.forEach(g => {
+      if (linkedIds.has(g.id)) return;
       evts.push({
-        id: g.id,
-        date: g.date,
-        time: g.time,
-        title: g.summary,
-        type: 'gcal',
-        meta: g,
+        id: g.id, date: g.date, time: g.time,
+        title: g.summary, type: 'gcal', meta: g,
       });
     });
     return evts;
-  }, [lessons, hostings, gcalExternal]);
+  }, [lessons, hostings, gcalEvents]);
 
   return (
     <DataContext.Provider value={{
-      students, lessons, hostings, gcalExternal,
+      students, lessons, hostings, gcalEvents,
       packages: PACKAGES, styles: STYLES,
-      gcalConnected, setGcalConnected, lastSync,
+      gcalStatus, gcalConnected: gcalStatus.connected,
+      lastSync, loadingData, error,
       addLesson, updateLesson, deleteLesson,
       addHosting, addStudent, updateStudent,
       completeSale, syncGoogleCalendar,
-      allCalendarEvents,
-      toast,
+      connectGoogle, disconnectGoogle, refreshData: fetchData,
+      allCalendarEvents, toast, showToast,
     }}>
       {children}
     </DataContext.Provider>
   );
 };
+
+// --- Helpers: convert sheet string values to typed ----
+const toNum = (v) => {
+  if (v === '' || v == null) return 0;
+  const n = Number(String(v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? 0 : n;
+};
+
+const normalizeStudent = (s) => ({
+  ...s,
+  lessonsRemaining: toNum(s.lessonsRemaining),
+  lessonsCompleted: toNum(s.lessonsCompleted),
+  balance: toNum(s.balance),
+});
+const normalizeStudents = (arr) => arr.map(normalizeStudent);
+
+const normalizeLesson = (l) => ({
+  ...l,
+  price: toNum(l.price),
+});
+const normalizeLessons = (arr) => arr.map(normalizeLesson);
+
+const normalizeHosting = (h) => ({
+  ...h,
+  income: toNum(h.income),
+});
+const normalizeHostings = (arr) => arr.map(normalizeHosting);
 
 export const useData = () => {
   const ctx = useContext(DataContext);

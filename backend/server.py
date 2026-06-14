@@ -21,6 +21,7 @@ import auth as auth_mod
 import google_oauth
 import sheets_client
 import calendar_client
+import calendar_income
 
 
 ROOT_DIR = Path(__file__).parent
@@ -333,6 +334,31 @@ async def calendar_info(user=Depends(auth_mod.require_staff)):
         'calendar_id': os.environ.get('GOOGLE_CALENDAR_ID', 'primary'),
         'is_primary': os.environ.get('GOOGLE_CALENDAR_ID', 'primary') == 'primary',
     }
+
+
+@api.get('/income/analysis')
+async def income_analysis(
+    days_back: int = Query(180, ge=1, le=730),
+    days_forward: int = Query(180, ge=1, le=730),
+    calendar: str = Query('primary', description="'primary' or 'app' (the configured Test CRM cal)"),
+    user=Depends(auth_mod.require_staff),
+):
+    """Analyze events from the chosen calendar and compute income breakdown."""
+    creds = await _require_creds()
+    if calendar == 'app':
+        cal_id = os.environ.get('GOOGLE_CALENDAR_ID', 'primary')
+    else:
+        cal_id = 'primary'
+    # Load known student names so the parser can identify them in event titles
+    students = await sheets_client.read_tab(creds, 'Students')
+    known_names = [s.get('name', '').strip() for s in students if s.get('name')]
+    events = await calendar_client.list_events(creds, days_back=days_back,
+                                               days_forward=days_forward,
+                                               calendar_id=cal_id)
+    analysis = calendar_income.analyze_events(events, known_names=known_names)
+    analysis['source_calendar'] = cal_id
+    analysis['window'] = {'days_back': days_back, 'days_forward': days_forward}
+    return analysis
 
 
 @api.get('/')

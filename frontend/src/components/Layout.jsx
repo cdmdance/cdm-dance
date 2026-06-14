@@ -9,7 +9,7 @@ const TABS = [
   { key: 'lessons', label: 'Lessons' },
   { key: 'hostings', label: 'Hostings' },
   { key: 'calendar', label: 'Calendar' },
-  { key: 'projections', label: 'Projections' },
+  { key: 'projections', label: 'Income' },
 ];
 
 const Layout = ({ active, onTabChange, children }) => {

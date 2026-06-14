@@ -1,44 +1,42 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Users, CalendarDays, DollarSign, TrendingUp, MapPin, Clock, UserCheck, Home as HomeIcon } from 'lucide-react';
+import api from '../lib/api';
+import { Users, CalendarDays, TrendingUp, MapPin, Clock, UserCheck, Home as HomeIcon, History, ArrowUpRight } from 'lucide-react';
+
+const fmt = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`;
+const fmtDate = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '-';
 
 const Dashboard = ({ onNavigate }) => {
-  const { students, lessons, hostings } = useData();
+  const { students } = useData();
+  const [income, setIncome] = useState(null);
+  const [incomeLoading, setIncomeLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    api.get('/income/analysis', { params: { days_back: 180, days_forward: 180, calendar: 'primary' } })
+      .then(res => { if (active) setIncome(res.data); })
+      .catch(() => {})
+      .finally(() => { if (active) setIncomeLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-
     const teachCount = students.filter(s => s.relationship === 'Teach' || s.relationship === 'Both').length;
     const hostCount = students.filter(s => s.relationship === 'Host' || s.relationship === 'Both').length;
     const withNext = students.filter(s => s.nextScheduled && s.nextScheduled >= today).length;
-
-    const upcomingLessons = lessons.filter(l => l.date >= today && (l.status === 'Scheduled' || l.status === 'Rescheduled'));
-    const upcomingHostings = hostings.filter(h => h.date >= today);
-
-    const projectedLessons = upcomingLessons.reduce((sum, l) => sum + (Number(l.price) || 0), 0);
-    const projectedHostings = upcomingHostings.reduce((sum, h) => sum + (Number(h.income) || 0), 0);
-
     return {
       totalContacts: students.length,
       teachCount, hostCount, withNext,
-      upcomingLessons: upcomingLessons.length,
-      upcomingHostings: upcomingHostings.length,
-      projectedLessons, projectedHostings,
-      projected: projectedLessons + projectedHostings,
     };
-  }, [students, lessons, hostings]);
+  }, [students]);
 
-  const upcomingFromSheets = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const evts = [];
-    lessons.filter(l => l.date >= today && l.status !== 'Cancelled').forEach(l => {
-      evts.push({ id: l.id, type: 'lesson', date: l.date, time: l.time, label: l.studentName || 'Lesson', subtitle: l.style, location: l.location });
-    });
-    hostings.filter(h => h.date >= today).forEach(h => {
-      evts.push({ id: h.id, type: 'hosting', date: h.date, time: '20:00', label: 'Hosting', subtitle: h.names, location: h.location });
-    });
-    return evts.sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).slice(0, 8);
-  }, [lessons, hostings]);
+  const upcomingFromCalendar = useMemo(() => {
+    if (!income) return [];
+    return income.events
+      .filter(e => e.date >= income.today && (e.type === 'lesson' || e.type === 'hosting'))
+      .slice(0, 8);
+  }, [income]);
 
   const upcomingByContacts = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -48,9 +46,6 @@ const Dashboard = ({ onNavigate }) => {
       .slice(0, 6);
   }, [students]);
 
-  const fmt = (n) => `$${Number(n).toLocaleString()}`;
-  const fmtDate = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '-';
-
   return (
     <div>
       <h2 className="section-title">
@@ -58,13 +53,42 @@ const Dashboard = ({ onNavigate }) => {
         <span className="sub">Overview</span>
       </h2>
 
+      {/* Top stats row */}
       <div className="grid-stats" style={{ marginBottom: 22 }}>
+        <div className="stat-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div className="stat-label">Earned (past 6mo)</div>
+              <div className="stat-value" style={{ color: 'var(--success)' }}>
+                {incomeLoading ? '...' : fmt(income?.earned?.total || 0)}
+              </div>
+              <div className="stat-sub">
+                {income ? `${income.earned.hostings_count} hostings + ${income.earned.lessons_count} lessons` : 'Loading...'}
+              </div>
+            </div>
+            <History size={20} color="var(--gold-dim)" />
+          </div>
+        </div>
+        <div className="stat-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div className="stat-label">Projected (next 6mo)</div>
+              <div className="stat-value">
+                {incomeLoading ? '...' : fmt(income?.projected?.total || 0)}
+              </div>
+              <div className="stat-sub">
+                {income ? `${income.projected.hostings_count} hostings + ${income.projected.lessons_count} lessons` : 'Loading...'}
+              </div>
+            </div>
+            <ArrowUpRight size={20} color="var(--gold-dim)" />
+          </div>
+        </div>
         <div className="stat-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div className="stat-label">Total Contacts</div>
               <div className="stat-value">{stats.totalContacts}</div>
-              <div className="stat-sub">{stats.withNext} with upcoming dates</div>
+              <div className="stat-sub">{stats.teachCount} students - {stats.hostCount} hosts</div>
             </div>
             <Users size={20} color="var(--gold-dim)" />
           </div>
@@ -72,29 +96,11 @@ const Dashboard = ({ onNavigate }) => {
         <div className="stat-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <div className="stat-label">Students (Teach)</div>
-              <div className="stat-value">{stats.teachCount}</div>
-              <div className="stat-sub">Including "Both"</div>
-            </div>
-            <UserCheck size={20} color="var(--gold-dim)" />
-          </div>
-        </div>
-        <div className="stat-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div className="stat-label">Hosts</div>
-              <div className="stat-value">{stats.hostCount}</div>
-              <div className="stat-sub">Including "Both"</div>
-            </div>
-            <HomeIcon size={20} color="var(--gold-dim)" />
-          </div>
-        </div>
-        <div className="stat-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div className="stat-label">Projected Income</div>
-              <div className="stat-value">{fmt(stats.projected)}</div>
-              <div className="stat-sub">From booked lessons + hostings</div>
+              <div className="stat-label">12-Month Total</div>
+              <div className="stat-value">
+                {incomeLoading ? '...' : fmt((income?.earned?.total || 0) + (income?.projected?.total || 0))}
+              </div>
+              <div className="stat-sub">Earned + projected</div>
             </div>
             <TrendingUp size={20} color="var(--gold-dim)" />
           </div>
@@ -104,29 +110,36 @@ const Dashboard = ({ onNavigate }) => {
       <div className="grid-2col" style={{ marginBottom: 22 }}>
         <div className="cdm-card" style={{ padding: 0 }}>
           <div className="cdm-card-header">
-            <h3>Upcoming (Lessons &amp; Hostings)</h3>
+            <h3>Upcoming Events (from Google Calendar)</h3>
             <button className="btn-ghost" onClick={() => onNavigate && onNavigate('calendar')}>Calendar</button>
           </div>
           <div style={{ padding: '8px 0' }}>
-            {upcomingFromSheets.length === 0 && (
-              <div style={{ padding: 22, color: 'var(--text-dim)', textAlign: 'center' }}>No upcoming items logged yet</div>
+            {upcomingFromCalendar.length === 0 && (
+              <div style={{ padding: 22, color: 'var(--text-dim)', textAlign: 'center' }}>
+                {incomeLoading ? 'Loading...' : 'No upcoming income events'}
+              </div>
             )}
-            {upcomingFromSheets.map(l => (
-              <div key={l.type + l.id} style={{
+            {upcomingFromCalendar.map((e, i) => (
+              <div key={i} style={{
                 padding: '14px 22px',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 borderBottom: '1px solid rgba(42,42,50,0.5)',
               }}>
-                <div>
-                  <div style={{ color: 'var(--text)', fontSize: 14, marginBottom: 4 }}>{l.label}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: 'var(--text)', fontSize: 14, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {e.summary}
+                  </div>
                   <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--text-dim)', flexWrap: 'wrap' }}>
-                    <span><Clock size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />{fmtDate(l.date)} {l.time && '· ' + l.time}</span>
-                    {l.location && <span><MapPin size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />{l.location}</span>}
+                    <span><Clock size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />{fmtDate(e.date)} {e.time && '- ' + e.time}</span>
+                    {e.location && <span><MapPin size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />{e.location}</span>}
                   </div>
                 </div>
-                <span className={`pill ${l.type === 'lesson' ? 'pill-gold' : 'pill-green'}`}>{l.subtitle || l.type}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className={`pill ${e.type === 'hosting' ? 'pill-green' : 'pill-gold'}`}>{e.type}</span>
+                  <span className="text-gold" style={{ fontFamily: 'Playfair Display, serif', fontSize: 16, minWidth: 60, textAlign: 'right' }}>{fmt(e.income)}</span>
+                </div>
               </div>
             ))}
           </div>
@@ -134,25 +147,25 @@ const Dashboard = ({ onNavigate }) => {
 
         <div className="cdm-card" style={{ padding: 0 }}>
           <div className="cdm-card-header">
-            <h3>Income Breakdown</h3>
-            <span style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.16em', textTransform: 'uppercase' }}>Projected</span>
+            <h3>This Year At a Glance</h3>
+            <button className="btn-ghost" onClick={() => onNavigate && onNavigate('projections')}>Details</button>
           </div>
           <div style={{ padding: 22 }}>
-            <div className="summary-row">
-              <span>From Booked Lessons</span>
-              <span className="text-gold">{fmt(stats.projectedLessons)}</span>
-            </div>
-            <div className="summary-row">
-              <span>From Booked Hostings</span>
-              <span className="text-gold">{fmt(stats.projectedHostings)}</span>
-            </div>
-            <div className="summary-row total">
-              <span>Total Projected</span>
-              <span>{fmt(stats.projected)}</span>
-            </div>
-            <button className="btn-ghost" style={{ width: '100%', marginTop: 16 }} onClick={() => onNavigate && onNavigate('projections')}>
-              View Detailed Projections
-            </button>
+            {income ? (
+              <>
+                <div className="summary-row"><span>Past 6 mo - Hostings</span><span className="text-gold">{fmt(income.earned.hostings)}</span></div>
+                <div className="summary-row"><span>Past 6 mo - Lessons</span><span className="text-gold">{fmt(income.earned.lessons)}</span></div>
+                <div className="summary-row"><span>Next 6 mo - Hostings</span><span className="text-gold">{fmt(income.projected.hostings)}</span></div>
+                <div className="summary-row"><span>Next 6 mo - Lessons</span><span className="text-gold">{fmt(income.projected.lessons)}</span></div>
+                <div className="summary-row total">
+                  <span>12-Month Total</span>
+                  <span>{fmt(income.earned.total + income.projected.total)}</span>
+                </div>
+                <div style={{ marginTop: 14, fontSize: 11, color: 'var(--muted)', textAlign: 'center', letterSpacing: '0.05em' }}>
+                  Rates: ${income.rates.hosting_per_person}/host - ${income.rates.lesson_default}/lesson
+                </div>
+              </>
+            ) : <div style={{ color: 'var(--text-dim)', textAlign: 'center' }}>Loading...</div>}
           </div>
         </div>
       </div>

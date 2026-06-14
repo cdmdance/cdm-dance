@@ -86,15 +86,17 @@ async def delete_event(creds, event_id: str) -> bool:
         return False
 
 
-async def list_events(creds, days_back: int = 30, days_forward: int = 90) -> list[dict]:
+async def list_events(creds, days_back: int = 30, days_forward: int = 90,
+                      calendar_id: str | None = None) -> list[dict]:
     svc = _service(creds)
+    cal_id = calendar_id or CALENDAR_ID
     now = datetime.utcnow()
     time_min = (now - timedelta(days=days_back)).isoformat() + 'Z'
     time_max = (now + timedelta(days=days_forward)).isoformat() + 'Z'
     try:
         res = await _to_thread(lambda: svc.events().list(
-            calendarId=CALENDAR_ID, timeMin=time_min, timeMax=time_max,
-            singleEvents=True, orderBy='startTime', maxResults=500).execute())
+            calendarId=cal_id, timeMin=time_min, timeMax=time_max,
+            singleEvents=True, orderBy='startTime', maxResults=2500).execute())
         events = []
         for e in res.get('items', []):
             start = e.get('start', {})

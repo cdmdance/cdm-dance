@@ -46,16 +46,13 @@ class LoginIn(BaseModel):
 class StudentIn(BaseModel):
     id: str | None = None
     name: str
-    email: str | None = ''
+    relationship: str | None = ''  # Both | Teach | Host
+    lastSeen: str | None = ''
+    nextScheduled: str | None = ''
+    lessons6mo: int | float | None = 0
+    hostings6mo: int | float | None = 0
     phone: str | None = ''
-    level: str | None = 'Beginner'
-    primaryStyle: str | None = ''
-    package: str | None = ''
-    lessonsRemaining: int | float | None = 0
-    lessonsCompleted: int | float | None = 0
-    balance: int | float | None = 0
-    status: str | None = 'Active'
-    joinDate: str | None = ''
+    email: str | None = ''
     notes: str | None = ''
 
 
@@ -164,8 +161,6 @@ async def get_all_data(user=Depends(auth_mod.require_staff)):
 async def add_student(body: StudentIn, user=Depends(auth_mod.require_staff)):
     creds = await _require_creds()
     rec = body.model_dump()
-    if not rec.get('joinDate'):
-        rec['joinDate'] = datetime.utcnow().date().isoformat()
     return await sheets_client.append_row(creds, 'Students', rec)
 
 
@@ -286,6 +281,40 @@ async def setup_ensure_tabs(user=Depends(auth_mod.require_staff)):
     creds = await _require_creds()
     await sheets_client.ensure_tabs(creds)
     return {'ok': True}
+
+
+@api.post('/setup/import-students')
+async def import_students(user=Depends(auth_mod.require_staff)):
+    """Wipe Students tab and seed with the real data from seed/students_seed.json."""
+    creds = await _require_creds()
+    await sheets_client.ensure_tabs(creds)
+    seed_path = ROOT_DIR / 'seed' / 'students_seed.json'
+    if not seed_path.exists():
+        raise HTTPException(status_code=404, detail='Seed file not found')
+    import json
+    with open(seed_path) as f:
+        students = json.load(f)
+    await sheets_client.clear_tab_keep_header(creds, 'Students')
+    count = await sheets_client.bulk_append(creds, 'Students', students)
+    return {'ok': True, 'imported': count}
+
+
+@api.post('/setup/clear-tab')
+async def clear_tab(tab: str, user=Depends(auth_mod.require_staff)):
+    """Wipe all data rows from a tab (keeps header). Useful to clear test data."""
+    creds = await _require_creds()
+    if tab not in ('Students', 'Lessons', 'Hostings'):
+        raise HTTPException(status_code=400, detail='Invalid tab')
+    await sheets_client.clear_tab_keep_header(creds, tab)
+    return {'ok': True, 'cleared': tab}
+
+
+@api.get('/calendar/info')
+async def calendar_info(user=Depends(auth_mod.require_staff)):
+    return {
+        'calendar_id': os.environ.get('GOOGLE_CALENDAR_ID', 'primary'),
+        'is_primary': os.environ.get('GOOGLE_CALENDAR_ID', 'primary') == 'primary',
+    }
 
 
 @api.get('/')

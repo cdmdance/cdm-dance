@@ -1,4 +1,5 @@
 """Google Calendar two-way sync for CDM Dance CRM."""
+import os
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -6,7 +7,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
-CALENDAR_ID = 'primary'
+CALENDAR_ID = os.environ.get('GOOGLE_CALENDAR_ID', 'primary')
 
 
 def _service(creds):

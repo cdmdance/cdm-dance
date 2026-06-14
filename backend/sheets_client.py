@@ -18,9 +18,8 @@ logger = logging.getLogger(__name__)
 
 SHEET_ID = os.environ.get('GOOGLE_SHEET_ID', '1RDgxYt5NcrqwME5LT9vrBg29pGi3ue4yFNPDXA02u8w')
 
-STUDENT_HEADERS = ['id', 'name', 'email', 'phone', 'level', 'primaryStyle', 'package',
-                   'lessonsRemaining', 'lessonsCompleted', 'balance', 'status',
-                   'joinDate', 'notes']
+STUDENT_HEADERS = ['id', 'name', 'relationship', 'lastSeen', 'nextScheduled',
+                   'lessons6mo', 'hostings6mo', 'phone', 'email', 'notes']
 LESSON_HEADERS = ['id', 'studentId', 'studentName', 'date', 'time', 'style', 'location',
                   'status', 'price', 'notes', 'gcalEventId']
 HOSTING_HEADERS = ['id', 'date', 'location', 'names', 'income', 'notes', 'gcalEventId']
@@ -169,7 +168,7 @@ async def delete_row_by_id(creds, tab: str, record_id: str) -> bool:
         spreadsheetId=SHEET_ID, range=f"{tab}!A1:ZZ").execute())
     rows = res.get('values', [])
     id_col = headers.index('id')
-    for i, row in enumerate(rows[1:], start=1):  # 0-indexed within sheet (row 0 = header)
+    for i, row in enumerate(rows[1:], start=1):
         if id_col < len(row) and row[id_col] == record_id:
             requests = [{'deleteDimension': {'range': {
                 'sheetId': sheet_id, 'dimension': 'ROWS',
@@ -178,3 +177,33 @@ async def delete_row_by_id(creds, tab: str, record_id: str) -> bool:
                 spreadsheetId=SHEET_ID, body={'requests': requests}).execute())
             return True
     return False
+
+
+async def clear_tab_keep_header(creds, tab: str) -> None:
+    """Wipe all data rows from tab but keep header row 1."""
+    svc = _service(creds)
+    headers = await get_headers(creds, tab)
+    if not headers:
+        return
+    last_col = chr(ord('A') + len(headers) - 1)
+    await _to_thread(lambda: svc.spreadsheets().values().clear(
+        spreadsheetId=SHEET_ID, range=f"{tab}!A2:{last_col}").execute())
+
+
+async def bulk_append(creds, tab: str, records: list[dict]) -> int:
+    """Append multiple records at once, assigning IDs."""
+    if not records:
+        return 0
+    svc = _service(creds)
+    headers = await get_headers(creds, tab)
+    rows = []
+    for rec in records:
+        if 'id' in headers and not rec.get('id'):
+            rec['id'] = str(uuid.uuid4())
+        rows.append(_record_to_row(rec, headers))
+    await _to_thread(lambda: svc.spreadsheets().values().append(
+        spreadsheetId=SHEET_ID, range=f"{tab}!A:A",
+        valueInputOption='USER_ENTERED', insertDataOption='INSERT_ROWS',
+        body={'values': rows}).execute())
+    return len(rows)
+

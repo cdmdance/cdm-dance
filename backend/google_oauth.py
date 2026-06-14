@@ -51,13 +51,14 @@ def is_configured() -> bool:
     return _client_config() is not None and bool(os.environ.get('PUBLIC_BACKEND_URL'))
 
 
-def build_auth_url() -> tuple[str, str]:
+def build_auth_url() -> tuple[str, str, str]:
     cfg = _client_config()
     if not cfg:
         raise RuntimeError('GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not configured')
     flow = Flow.from_client_config(cfg, scopes=SCOPES, redirect_uri=_redirect_uri())
     url, state = flow.authorization_url(access_type='offline', prompt='consent', include_granted_scopes='true')
-    return url, state
+    code_verifier = getattr(flow, 'code_verifier', None) or ''
+    return url, state, code_verifier
 
 
 async def handle_callback(db, code: str, state: str | None) -> dict:
@@ -65,6 +66,11 @@ async def handle_callback(db, code: str, state: str | None) -> dict:
     if not cfg:
         raise RuntimeError('OAuth not configured')
     flow = Flow.from_client_config(cfg, scopes=SCOPES, redirect_uri=_redirect_uri())
+    # Restore code_verifier saved during auth start (required for PKCE)
+    if state:
+        rec = await db.oauth_states.find_one({'state': state})
+        if rec and rec.get('code_verifier'):
+            flow.code_verifier = rec['code_verifier']
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         flow.fetch_token(code=code)

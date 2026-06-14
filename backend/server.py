@@ -107,8 +107,12 @@ async def oauth_login():
             "<h2>Google OAuth not configured</h2><p>GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and PUBLIC_BACKEND_URL must be set.</p>",
             status_code=500,
         )
-    url, state = google_oauth.build_auth_url()
-    await db.oauth_states.insert_one({'state': state, 'created_at': datetime.utcnow()})
+    url, state, code_verifier = google_oauth.build_auth_url()
+    await db.oauth_states.insert_one({
+        'state': state,
+        'code_verifier': code_verifier,
+        'created_at': datetime.utcnow(),
+    })
     return RedirectResponse(url)
 
 

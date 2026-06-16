@@ -63,6 +63,16 @@ Clone the existing CRM at cdm.dance/crm.html maintaining its dark+gold aesthetic
 - Fixed JSX unescaped entities (quotes/apostrophes) in POS, Dashboard, Enrollments
 - All blocking lint errors resolved; deployment readiness re-verified PASS
 
+### 2026-02 — Calendar fix + Edit Students + Lessons Remaining (Option B)
+- **Calendar Sat/Sun bug**: replaced `toISOString().slice(0,10)` (UTC-based) with local-timezone YYYY-MM-DD formatter in `CalendarView.jsx` so weekend cells correctly key to local-date events
+- **Edit Students**: detail modal now flips into edit mode (name, relationship, contact, dates, notes) with Save/Cancel; Delete button (with confirm) on detail; new `DELETE /api/students/{id}` endpoint
+- **Bonus Lessons**: separate "Add Bonus Lessons" action adds free lessons to `lessonsTotal` without affecting `totalPaid`; logged as zero-amount Payment row for audit; new `POST /api/students/{id}/bonus-lessons` endpoint
+- **Lessons Remaining (Option B)**:
+  - DataContext now caches `studentBalances` map; `fetchAllStudentBalances` parallel-fetches per-student balances; auto-invalidates on payment/sign/bonus
+  - Student card: new 3-col tile (Bought / Used / Remaining) with color-coded Remaining (gold > 2, amber ≤ 2, red = 0) and EMPTY/LOW pill badge
+  - Detail modal: dedicated 3-tile balance row (Purchased / Used / Remaining)
+- `lessonsTotal` and `totalPaid` are read-only in Edit form (only POS, Enrollments, or Bonus action change them)
+
 ## Roadmap
 ### P0 (current)
 - [x] Verify deployment readiness

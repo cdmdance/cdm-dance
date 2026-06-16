@@ -238,6 +238,55 @@ async def update_student(student_id: str, body: StudentIn, user=Depends(auth_mod
     return res
 
 
+@api.delete('/students/{student_id}')
+async def delete_student(student_id: str, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    ok = await sheets_client.delete_row_by_id(creds, 'Students', student_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail='Student not found')
+    return {'ok': True}
+
+
+class BonusLessonsIn(BaseModel):
+    lessons: int | float
+    note: str | None = ''
+
+
+@api.post('/students/{student_id}/bonus-lessons')
+async def add_bonus_lessons(student_id: str, body: BonusLessonsIn, user=Depends(auth_mod.require_staff)):
+    """Add bonus (free) lessons to a student. Adds to lessonsTotal but does not affect totalPaid.
+    Logs the bonus as a Payment row with amount=0 for audit trail."""
+    creds = await _require_creds()
+    if not body.lessons or float(body.lessons) <= 0:
+        raise HTTPException(status_code=400, detail='Lessons must be a positive number')
+    students = await sheets_client.read_tab(creds, 'Students')
+    student = next((s for s in students if s.get('id') == student_id), None)
+    if not student:
+        raise HTTPException(status_code=404, detail='Student not found')
+    try:
+        cur_lessons_total = float(student.get('lessonsTotal') or 0)
+    except Exception:
+        cur_lessons_total = 0
+    new_lessons_total = cur_lessons_total + float(body.lessons)
+    updated = await sheets_client.update_row_by_id(creds, 'Students', student_id, {
+        'lessonsTotal': new_lessons_total,
+    })
+    # Log as zero-amount payment for audit
+    note = body.note.strip() if body.note else 'Bonus lessons added by staff'
+    await sheets_client.append_row(creds, 'Payments', {
+        'date': datetime.utcnow().date().isoformat(),
+        'studentId': student_id,
+        'studentName': student.get('name', ''),
+        'packageId': '',
+        'packageName': 'Bonus',
+        'lessons': float(body.lessons),
+        'amount': 0,
+        'method': 'Bonus',
+        'notes': note,
+    })
+    return {'student_updated': updated, 'added_lessons': float(body.lessons)}
+
+
 @api.post('/lessons')
 async def add_lesson(body: LessonIn, user=Depends(auth_mod.require_staff)):
     creds = await _require_creds()

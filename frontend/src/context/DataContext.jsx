@@ -17,6 +17,8 @@ export const DataProvider = ({ children }) => {
   const [loadingData, setLoadingData] = useState(false);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
+  const [studentBalances, setStudentBalances] = useState({}); // { [studentId]: { lessonsTotal, lessonsUsed, lessonsRemaining, totalPaid } }
+  const [balancesLoading, setBalancesLoading] = useState(false);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -156,7 +158,58 @@ export const DataProvider = ({ children }) => {
     if (!existing) return;
     const res = await api.put(`/students/${id}`, { ...existing, ...patch });
     setStudents(prev => prev.map(s => s.id === id ? normalizeStudent(res.data) : s));
+    showToast('Student updated');
   };
+  const deleteStudent = async (id) => {
+    await api.delete(`/students/${id}`);
+    setStudents(prev => prev.filter(s => s.id !== id));
+    setStudentBalances(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    showToast('Student removed');
+  };
+  const addBonusLessons = async (id, lessons, note) => {
+    const res = await api.post(`/students/${id}/bonus-lessons`, { lessons, note });
+    if (res.data.student_updated) {
+      setStudents(prev => prev.map(s => s.id === id
+        ? { ...s, lessonsTotal: Number(res.data.student_updated.lessonsTotal || 0) }
+        : s));
+    }
+    // Invalidate balance for this student so it refetches
+    setStudentBalances(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    showToast(`+${res.data.added_lessons} bonus lesson${res.data.added_lessons === 1 ? '' : 's'} added`);
+  };
+
+  // Student balances (lessons used / remaining)
+  const fetchStudentBalance = useCallback(async (id) => {
+    try {
+      const res = await api.get(`/students/${id}/balance`);
+      setStudentBalances(prev => ({ ...prev, [id]: res.data }));
+      return res.data;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+  const fetchAllStudentBalances = useCallback(async () => {
+    if (!students.length) return;
+    setBalancesLoading(true);
+    try {
+      const results = await Promise.all(
+        students.map(s => api.get(`/students/${s.id}/balance`).then(r => r.data).catch(() => null))
+      );
+      const map = {};
+      results.forEach(b => { if (b && b.studentId) map[b.studentId] = b; });
+      setStudentBalances(map);
+    } finally {
+      setBalancesLoading(false);
+    }
+  }, [students]);
 
   // Packages
   const addPackage = async (pkg) => {
@@ -187,6 +240,12 @@ export const DataProvider = ({ children }) => {
       setStudents(prev => prev.map(s => s.id === payment.studentId
         ? { ...s, lessonsTotal: res.data.student_updated.lessonsTotal, totalPaid: res.data.student_updated.totalPaid }
         : s));
+      // Invalidate balance cache so it refetches
+      setStudentBalances(prev => {
+        const next = { ...prev };
+        delete next[payment.studentId];
+        return next;
+      });
     }
     showToast('Sale recorded');
     return res.data.payment;
@@ -284,7 +343,8 @@ export const DataProvider = ({ children }) => {
       gcalStatus, gcalConnected: gcalStatus.connected,
       lastSync, loadingData, error,
       addLesson, updateLesson, deleteLesson,
-      addHosting, addStudent, updateStudent,
+      addHosting, addStudent, updateStudent, deleteStudent, addBonusLessons,
+      studentBalances, balancesLoading, fetchStudentBalance, fetchAllStudentBalances,
       addPackage, updatePackage, deletePackage,
       recordPayment, deletePayment,
       createEnrollment, signEnrollment, cancelEnrollment, downloadEnrollmentPDF,

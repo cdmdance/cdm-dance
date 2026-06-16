@@ -27,6 +27,10 @@ HOSTING_HEADERS = ['id', 'date', 'location', 'names', 'income', 'notes', 'gcalEv
 PACKAGE_HEADERS = ['id', 'name', 'lessons', 'price', 'description', 'active']
 PAYMENT_HEADERS = ['id', 'date', 'studentId', 'studentName', 'packageId', 'packageName',
                    'lessons', 'amount', 'method', 'notes']
+ENROLLMENT_HEADERS = ['id', 'type', 'date', 'studentId', 'studentName', 'status',
+                      'programTier', 'lessonsCount', 'pricePerLesson', 'totalValue', 'expirationDate',
+                      'eventName', 'eventType', 'eventLocation', 'eventDate', 'totalCost',
+                      'paymentMethod', 'amountPaid', 'notes', 'signedBy', 'signedAt']
 
 TAB_HEADERS = {
     'Students': STUDENT_HEADERS,
@@ -34,6 +38,7 @@ TAB_HEADERS = {
     'Hostings': HOSTING_HEADERS,
     'Packages': PACKAGE_HEADERS,
     'Payments': PAYMENT_HEADERS,
+    'Enrollments': ENROLLMENT_HEADERS,
 }
 
 
@@ -126,9 +131,10 @@ async def append_row(creds, tab: str, record: dict) -> dict:
     if 'id' in headers and not record.get('id'):
         record['id'] = str(uuid.uuid4())
     row = _record_to_row(record, headers)
+    # Use RAW so date-like strings don't auto-convert to Sheets serial numbers
     await _to_thread(lambda: svc.spreadsheets().values().append(
         spreadsheetId=SHEET_ID, range=f"{tab}!A:A",
-        valueInputOption='USER_ENTERED', insertDataOption='INSERT_ROWS',
+        valueInputOption='RAW', insertDataOption='INSERT_ROWS',
         body={'values': [row]}).execute())
     return record
 
@@ -152,7 +158,7 @@ async def update_row_by_id(creds, tab: str, record_id: str, patch: dict) -> dict
             await _to_thread(lambda r=i: svc.spreadsheets().values().update(
                 spreadsheetId=SHEET_ID,
                 range=f"{tab}!A{r}:{chr(ord('A') + len(headers) - 1)}{r}",
-                valueInputOption='USER_ENTERED', body={'values': [new_row]}).execute())
+                valueInputOption='RAW', body={'values': [new_row]}).execute())
             return current
     return None
 
@@ -233,7 +239,7 @@ async def bulk_append(creds, tab: str, records: list[dict]) -> int:
         rows.append(_record_to_row(rec, headers))
     await _to_thread(lambda: svc.spreadsheets().values().append(
         spreadsheetId=SHEET_ID, range=f"{tab}!A:A",
-        valueInputOption='USER_ENTERED', insertDataOption='INSERT_ROWS',
+        valueInputOption='RAW', insertDataOption='INSERT_ROWS',
         body={'values': rows}).execute())
     return len(rows)
 

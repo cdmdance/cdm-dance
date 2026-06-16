@@ -10,6 +10,7 @@ export const DataProvider = ({ children }) => {
   const [hostings, setHostings] = useState([]);
   const [packages, setPackages] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [enrollments, setEnrollments] = useState([]);
   const [gcalEvents, setGcalEvents] = useState([]);
   const [gcalStatus, setGcalStatus] = useState({ configured: false, connected: false, email: null });
   const [lastSync, setLastSync] = useState(null);
@@ -36,11 +37,13 @@ export const DataProvider = ({ children }) => {
     setLoadingData(true);
     setError(null);
     try {
-      const [dataRes, eventsRes, pkgRes, payRes] = await Promise.all([
+      const [dataRes, eventsRes, pkgRes, payRes, incomeRes, enrRes] = await Promise.all([
         api.get('/data/all'),
-        api.get('/calendar/events').catch(() => ({ data: [] })),
+        api.get('/calendar/events', { params: { calendar: 'all', days_back: 45, days_forward: 180 } }).catch(() => ({ data: [] })),
         api.get('/packages').catch(() => ({ data: [] })),
         api.get('/payments').catch(() => ({ data: [] })),
+        api.get('/income/analysis', { params: { days_back: 45, days_forward: 180, calendar: 'primary' } }).catch(() => ({ data: null })),
+        api.get('/enrollments').catch(() => ({ data: [] })),
       ]);
       const d = dataRes.data || {};
       setStudents(normalizeStudents(d.students || []));
@@ -48,10 +51,29 @@ export const DataProvider = ({ children }) => {
       setHostings(normalizeHostings(d.hostings || []));
       setPackages(normalizePackages(pkgRes.data || []));
       setPayments(normalizePayments(payRes.data || []));
-      setGcalEvents((eventsRes.data || []).map(e => ({
-        id: e.id, summary: e.summary, date: e.date, time: e.time,
-        location: e.location, source: 'gcal',
-      })));
+      setEnrollments(normalizeEnrollments(enrRes.data || []));
+      // Merge raw events + classified events from income analysis
+      const classifiedById = {};
+      if (incomeRes.data && incomeRes.data.events) {
+        for (const ev of incomeRes.data.events) {
+          if (ev.id) classifiedById[ev.id] = ev;
+        }
+      }
+      setGcalEvents((eventsRes.data || []).map(e => {
+        const enriched = classifiedById[e.id];
+        return {
+          id: e.id,
+          summary: e.summary,
+          date: e.date,
+          time: e.time,
+          location: e.location,
+          calendar: e.calendar,
+          type: enriched?.type || 'gcal',
+          student: enriched?.student || '',
+          names: enriched?.names || [],
+          income: enriched?.income || 0,
+        };
+      }));
       setLastSync(new Date().toISOString());
     } catch (e) {
       if (e.response?.status === 409) {
@@ -176,6 +198,41 @@ export const DataProvider = ({ children }) => {
     showToast('Payment removed');
   };
 
+  // Enrollments
+  const createEnrollment = async (enrollment) => {
+    const res = await api.post('/enrollments', enrollment);
+    setEnrollments(prev => [normalizeEnrollment(res.data), ...prev]);
+    showToast('Enrollment created (Pending signature)');
+    return res.data;
+  };
+  const signEnrollment = async (id, signedBy, sendEmail = true) => {
+    const res = await api.post(`/enrollments/${id}/sign`, { signedBy, sendEmail });
+    setEnrollments(prev => prev.map(e => e.id === id ? normalizeEnrollment(res.data.enrollment) : e));
+    await fetchData();
+    if (res.data.email_status === 'sent') showToast('Signed & receipt emailed to student');
+    else if (res.data.email_status === 'not_configured') showToast('Signed - email not configured (PDF available to download)');
+    else if (res.data.email_status === 'no_email_on_file') showToast('Signed - no email on file (PDF available to download)');
+    else if (res.data.email_status === 'failed') showToast('Signed - email failed: ' + (res.data.email_error || ''));
+    else showToast('Enrollment signed');
+    return res.data;
+  };
+  const cancelEnrollment = async (id) => {
+    await api.delete(`/enrollments/${id}`);
+    setEnrollments(prev => prev.map(e => e.id === id ? { ...e, status: 'Cancelled' } : e));
+    showToast('Enrollment cancelled');
+  };
+  const downloadEnrollmentPDF = async (id, studentName) => {
+    const res = await api.get(`/enrollments/${id}/pdf`, { responseType: 'blob' });
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `CDM-Enrollment-${(studentName || 'Student').replace(/\s+/g, '-')}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  };
+
   const syncGoogleCalendar = async () => {
     try {
       await fetchData();
@@ -204,9 +261,17 @@ export const DataProvider = ({ children }) => {
     const linkedIds = new Set([...lessons, ...hostings].map(x => x.gcalEventId).filter(Boolean));
     gcalEvents.forEach(g => {
       if (linkedIds.has(g.id)) return;
+      // Use classified type from income analysis if available
+      const type = g.type === 'lesson' || g.type === 'hosting' ? g.type : 'gcal';
       evts.push({
         id: g.id, date: g.date, time: g.time,
-        title: g.summary, type: 'gcal', meta: g,
+        title: g.summary,
+        type,
+        location: g.location,
+        student: g.student,
+        names: g.names,
+        income: g.income,
+        meta: g,
       });
     });
     return evts;
@@ -214,7 +279,7 @@ export const DataProvider = ({ children }) => {
 
   return (
     <DataContext.Provider value={{
-      students, lessons, hostings, packages, payments, gcalEvents,
+      students, lessons, hostings, packages, payments, enrollments, gcalEvents,
       styles: STYLES,
       gcalStatus, gcalConnected: gcalStatus.connected,
       lastSync, loadingData, error,
@@ -222,6 +287,7 @@ export const DataProvider = ({ children }) => {
       addHosting, addStudent, updateStudent,
       addPackage, updatePackage, deletePackage,
       recordPayment, deletePayment,
+      createEnrollment, signEnrollment, cancelEnrollment, downloadEnrollmentPDF,
       syncGoogleCalendar,
       connectGoogle, disconnectGoogle, refreshData: fetchData,
       allCalendarEvents, toast, showToast,
@@ -242,8 +308,38 @@ const toBool = (v) => {
   return s === 'true' || s === 'yes' || s === '1';
 };
 
+// Convert Excel/Sheets serial date number (e.g. 46176) to ISO "YYYY-MM-DD"
+// Excel epoch: 1899-12-30 (with the leap year bug compatibility)
+const SHEETS_EPOCH_MS = Date.UTC(1899, 11, 30);
+const serialToISO = (n) => {
+  const d = new Date(SHEETS_EPOCH_MS + n * 86400000);
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+};
+
+const toDate = (v) => {
+  if (!v) return '';
+  const s = String(v).trim();
+  if (!s) return '';
+  // Already ISO YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // M/D/YYYY or MM/DD/YYYY
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) {
+    return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  }
+  // Pure number => Sheets date serial
+  const num = Number(s);
+  if (!isNaN(num) && num > 1000 && num < 100000) {
+    return serialToISO(num);
+  }
+  return s;
+};
+
 const normalizeStudent = (s) => ({
   ...s,
+  lastSeen: toDate(s.lastSeen),
+  nextScheduled: toDate(s.nextScheduled),
   lessons6mo: toNum(s.lessons6mo),
   hostings6mo: toNum(s.hostings6mo),
   lessonsTotal: toNum(s.lessonsTotal),
@@ -271,6 +367,19 @@ const normalizePayment = (p) => ({
   lessons: toNum(p.lessons),
 });
 const normalizePayments = (arr) => arr.map(normalizePayment);
+
+const normalizeEnrollment = (e) => ({
+  ...e,
+  date: toDate(e.date),
+  eventDate: toDate(e.eventDate),
+  expirationDate: toDate(e.expirationDate),
+  lessonsCount: toNum(e.lessonsCount),
+  pricePerLesson: toNum(e.pricePerLesson),
+  totalValue: toNum(e.totalValue),
+  totalCost: toNum(e.totalCost),
+  amountPaid: toNum(e.amountPaid),
+});
+const normalizeEnrollments = (arr) => arr.map(normalizeEnrollment);
 
 export const useData = () => {
   const ctx = useContext(DataContext);

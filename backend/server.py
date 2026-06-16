@@ -27,6 +27,8 @@ import google_oauth
 import sheets_client
 import calendar_client
 import calendar_income
+import pdf_generator
+import email_sender
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -103,6 +105,38 @@ class PaymentIn(BaseModel):
     amount: int | float
     method: str | None = 'Cash'
     notes: str | None = ''
+
+
+class EnrollmentIn(BaseModel):
+    id: str | None = None
+    type: str  # 'Program' or 'Event'
+    date: str | None = None
+    studentId: str
+    studentName: str | None = ''
+    status: str | None = 'Pending'
+    # Program-specific
+    programTier: str | None = ''  # Bronze | Silver | Gold | Open
+    lessonsCount: int | float | None = 0
+    pricePerLesson: int | float | None = 0
+    totalValue: int | float | None = 0
+    expirationDate: str | None = ''
+    # Event-specific
+    eventName: str | None = ''
+    eventType: str | None = ''  # Showcase | Competition | Mini Match | Social | Other
+    eventLocation: str | None = ''
+    eventDate: str | None = ''
+    totalCost: int | float | None = 0
+    # Shared
+    paymentMethod: str | None = 'Cash'
+    amountPaid: int | float | None = 0
+    notes: str | None = ''
+    signedBy: str | None = ''
+    signedAt: str | None = ''
+
+
+class EnrollmentSignIn(BaseModel):
+    signedBy: str
+    sendEmail: bool = True
 
 
 # --------- Auth routes ---------
@@ -293,9 +327,34 @@ async def delete_hosting(hosting_id: str, user=Depends(auth_mod.require_staff)):
 
 # --------- Calendar routes ---------
 @api.get('/calendar/events')
-async def get_calendar_events(user=Depends(auth_mod.require_staff)):
+async def get_calendar_events(
+    calendar: str = Query('all', description="'all' (primary + app), 'primary', or 'app'"),
+    days_back: int = Query(45, ge=1, le=730),
+    days_forward: int = Query(180, ge=1, le=730),
+    user=Depends(auth_mod.require_staff),
+):
     creds = await _require_creds()
-    return await calendar_client.list_events(creds)
+    app_cal = os.environ.get('GOOGLE_CALENDAR_ID', 'primary')
+    cals_to_read = []
+    if calendar == 'primary':
+        cals_to_read = ['primary']
+    elif calendar == 'app':
+        cals_to_read = [app_cal]
+    else:  # all
+        cals_to_read = ['primary'] if app_cal == 'primary' else ['primary', app_cal]
+    all_events = []
+    seen_ids = set()
+    for cal_id in cals_to_read:
+        evs = await calendar_client.list_events(creds, days_back=days_back,
+                                                days_forward=days_forward,
+                                                calendar_id=cal_id)
+        for e in evs:
+            if e.get('id') in seen_ids:
+                continue
+            seen_ids.add(e.get('id'))
+            e['calendar'] = cal_id
+            all_events.append(e)
+    return all_events
 
 
 @api.post('/calendar/sync')
@@ -454,7 +513,6 @@ async def student_balance(student_id: str, user=Depends(auth_mod.require_staff))
         info = calendar_income.classify_event(e.get('summary', ''), known_names=known_names)
         if info['type'] == 'lesson':
             if calendar_income.canonical_name(info.get('student', '')).lower() == student.get('name', '').lower():
-                # If multi-student lesson with names list, count once per appearance
                 if info.get('names'):
                     lessons_used += sum(1 for n in info['names']
                                         if calendar_income.canonical_name(n).lower() == student.get('name', '').lower())
@@ -476,6 +534,163 @@ async def student_balance(student_id: str, user=Depends(auth_mod.require_staff))
     }
 
 
+# --------- Enrollments ---------
+def _enrollment_total(rec: dict) -> float:
+    if rec.get('type') == 'Program':
+        try:
+            return float(rec.get('lessonsCount') or 0) * float(rec.get('pricePerLesson') or 0)
+        except Exception:
+            return 0
+    try:
+        return float(rec.get('totalCost') or 0)
+    except Exception:
+        return 0
+
+
+@api.get('/enrollments')
+async def list_enrollments(user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    return await sheets_client.read_tab(creds, 'Enrollments')
+
+
+@api.post('/enrollments')
+async def create_enrollment(body: EnrollmentIn, user=Depends(auth_mod.require_staff)):
+    creds = await _require_creds()
+    rec = body.model_dump()
+    if not rec.get('date'):
+        rec['date'] = datetime.utcnow().date().isoformat()
+    if not rec.get('status'):
+        rec['status'] = 'Pending'
+    # Validate type
+    if rec['type'] not in ('Program', 'Event'):
+        raise HTTPException(status_code=400, detail='type must be Program or Event')
+    # Enrich student name
+    students = await sheets_client.read_tab(creds, 'Students')
+    student = next((s for s in students if s.get('id') == rec['studentId']), None)
+    if not student:
+        raise HTTPException(status_code=404, detail='Student not found')
+    rec['studentName'] = rec.get('studentName') or student.get('name', '')
+    # Auto-compute totals
+    if rec['type'] == 'Program':
+        rec['totalValue'] = _enrollment_total(rec)
+        # 1-year expiration from date
+        try:
+            d = datetime.fromisoformat(rec['date'][:10])
+            rec['expirationDate'] = d.replace(year=d.year + 1).date().isoformat()
+        except Exception:
+            pass
+    else:
+        rec['totalValue'] = 0
+    return await sheets_client.append_row(creds, 'Enrollments', rec)
+
+
+@api.post('/enrollments/{enrollment_id}/sign')
+async def sign_enrollment(enrollment_id: str, body: EnrollmentSignIn,
+                          user=Depends(auth_mod.require_staff)):
+    """Mark enrollment as signed, update student totals (for Programs),
+    optionally email the PDF receipt to the student."""
+    creds = await _require_creds()
+    enrollments = await sheets_client.read_tab(creds, 'Enrollments')
+    enrollment = next((e for e in enrollments if e.get('id') == enrollment_id), None)
+    if not enrollment:
+        raise HTTPException(status_code=404, detail='Enrollment not found')
+    if enrollment.get('status') == 'Signed':
+        raise HTTPException(status_code=400, detail='Enrollment already signed')
+    if not body.signedBy or len(body.signedBy.strip()) < 2:
+        raise HTTPException(status_code=400, detail='Typed full name is required to sign')
+
+    now_iso = datetime.utcnow().isoformat()
+    patch = {
+        'status': 'Signed',
+        'signedBy': body.signedBy.strip(),
+        'signedAt': now_iso,
+    }
+    updated = await sheets_client.update_row_by_id(creds, 'Enrollments', enrollment_id, patch)
+    enrollment.update(patch)
+
+    # Update student totals
+    students = await sheets_client.read_tab(creds, 'Students')
+    student = next((s for s in students if s.get('id') == enrollment.get('studentId')), None)
+    if student:
+        try:
+            cur_paid = float(student.get('totalPaid') or 0)
+            cur_lessons = float(student.get('lessonsTotal') or 0)
+        except Exception:
+            cur_paid = 0
+            cur_lessons = 0
+        amount_paid = float(enrollment.get('amountPaid') or 0)
+        add_lessons = float(enrollment.get('lessonsCount') or 0) if enrollment.get('type') == 'Program' else 0
+        await sheets_client.update_row_by_id(creds, 'Students', student['id'], {
+            'totalPaid': cur_paid + amount_paid,
+            'lessonsTotal': cur_lessons + add_lessons,
+        })
+
+    # Try to send email if configured and requested
+    email_status = 'skipped'
+    email_error = None
+    if body.sendEmail and student and student.get('email'):
+        try:
+            pdf_bytes = pdf_generator.generate_enrollment_pdf(enrollment)
+            filename = f"CDM-Enrollment-{enrollment.get('studentName', 'Student').replace(' ', '-')}.pdf"
+            email_sender.send_enrollment_email(
+                to_email=student['email'],
+                student_name=enrollment.get('studentName', ''),
+                enrollment_type=enrollment.get('type', 'Program'),
+                pdf_bytes=pdf_bytes,
+                pdf_filename=filename,
+            )
+            email_status = 'sent'
+        except RuntimeError as e:
+            email_status = 'not_configured'
+            email_error = str(e)
+        except Exception as e:
+            email_status = 'failed'
+            email_error = str(e)
+    elif body.sendEmail and (not student or not student.get('email')):
+        email_status = 'no_email_on_file'
+
+    return {
+        'enrollment': enrollment,
+        'email_status': email_status,
+        'email_error': email_error,
+    }
+
+
+@api.delete('/enrollments/{enrollment_id}')
+async def cancel_enrollment(enrollment_id: str, user=Depends(auth_mod.require_staff)):
+    """Mark an enrollment as cancelled (does NOT reverse student totals -
+    if the enrollment was signed, those totals stay; cancelling is for
+    administrative tracking only)."""
+    creds = await _require_creds()
+    res = await sheets_client.update_row_by_id(creds, 'Enrollments', enrollment_id, {'status': 'Cancelled'})
+    if not res:
+        raise HTTPException(status_code=404, detail='Enrollment not found')
+    return {'ok': True}
+
+
+@api.get('/enrollments/{enrollment_id}/pdf')
+async def enrollment_pdf(enrollment_id: str, user=Depends(auth_mod.require_staff)):
+    """Generate and stream the PDF for an enrollment."""
+    from fastapi.responses import Response
+    creds = await _require_creds()
+    enrollments = await sheets_client.read_tab(creds, 'Enrollments')
+    enrollment = next((e for e in enrollments if e.get('id') == enrollment_id), None)
+    if not enrollment:
+        raise HTTPException(status_code=404, detail='Enrollment not found')
+    pdf_bytes = pdf_generator.generate_enrollment_pdf(enrollment)
+    filename = f"CDM-Enrollment-{enrollment.get('studentName', 'Student').replace(' ', '-')}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@api.get('/setup/email-status')
+async def email_status(user=Depends(auth_mod.require_staff)):
+    return {'configured': email_sender.is_configured()}
+
+
 @api.post('/setup/import-students')
 async def import_students(user=Depends(auth_mod.require_staff)):
     """Reset all CRM tabs (wipe old/incompatible schema) and seed Students with the real data."""
@@ -486,11 +701,11 @@ async def import_students(user=Depends(auth_mod.require_staff)):
     import json
     with open(seed_path) as f:
         students = json.load(f)
-    # Reset all CRM tabs to match the new schema (creates Packages & Payments tabs too)
-    for tab in ('Students', 'Lessons', 'Hostings', 'Packages', 'Payments'):
+    # Reset all CRM tabs to match the new schema (creates Packages, Payments & Enrollments tabs too)
+    for tab in ('Students', 'Lessons', 'Hostings', 'Packages', 'Payments', 'Enrollments'):
         await sheets_client.reset_tab_with_headers(creds, tab)
     count = await sheets_client.bulk_append(creds, 'Students', students)
-    return {'ok': True, 'imported': count, 'reset_tabs': ['Students', 'Lessons', 'Hostings', 'Packages', 'Payments']}
+    return {'ok': True, 'imported': count, 'reset_tabs': ['Students', 'Lessons', 'Hostings', 'Packages', 'Payments', 'Enrollments']}
 
 
 @api.post('/setup/reset-all-tabs')

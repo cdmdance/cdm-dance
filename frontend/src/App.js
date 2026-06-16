@@ -12,6 +12,7 @@ import Lessons from './views/Lessons';
 import Hostings from './views/Hostings';
 import CalendarView from './views/CalendarView';
 import Projections from './views/Projections';
+import Enrollments from './views/Enrollments';
 
 const Loader = () => (
   <div style={{
@@ -43,6 +44,7 @@ const Shell = () => {
       case 'dashboard': content = <Dashboard onNavigate={setTab} />; break;
       case 'students': content = <Students />; break;
       case 'pos': content = <POS />; break;
+      case 'enrollments': content = <Enrollments />; break;
       case 'lessons': content = <Lessons />; break;
       case 'hostings': content = <Hostings />; break;
       case 'calendar': content = <CalendarView />; break;

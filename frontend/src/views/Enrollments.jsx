@@ -62,7 +62,7 @@ const Enrollments = () => {
         {filtered.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center' }}>
             <FileText size={28} color="var(--gold-dim)" style={{ margin: '0 auto 12px', display: 'block' }} />
-            <p style={{ color: 'var(--text-dim)' }}>No enrollments yet. Click "New Enrollment" to create the first one.</p>
+            <p style={{ color: 'var(--text-dim)' }}>No enrollments yet. Click &quot;New Enrollment&quot; to create the first one.</p>
           </div>
         ) : (
           <table className="cdm-table">
@@ -419,7 +419,7 @@ const SignDialog = ({ enrollment, students, onClose, onSign, onDownload }) => {
             )}
             {!hasEmail && (
               <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
-                No email on file for this student - you'll be able to download the PDF after signing.
+                No email on file for this student - you&apos;ll be able to download the PDF after signing.
               </p>
             )}
 

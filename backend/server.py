@@ -179,8 +179,9 @@ async def oauth_login():
 async def oauth_callback(code: str = Query(...), state: str | None = Query(None), error: str | None = Query(None)):
     if error:
         return HTMLResponse(f"<h2>Google sign-in cancelled</h2><p>{error}</p>")
+    info = {}
     try:
-        info = await google_oauth.handle_callback(db, code, state)
+        info = await google_oauth.handle_callback(db, code, state) or {}
     except Exception as e:
         logger.exception('OAuth callback failed')
         return HTMLResponse(f"<h2>Connection failed</h2><pre>{e}</pre>")
@@ -193,7 +194,7 @@ async def oauth_callback(code: str = Query(...), state: str | None = Query(None)
     return HTMLResponse(f"""
         <html><body style='font-family: -apple-system, sans-serif; background:#0a0a0c; color:#ece6d5; padding:40px; text-align:center;'>
         <h1 style='color:#c8a55b; font-family: Georgia, serif;'>Connected</h1>
-        <p>Signed in as <b>{info.get('email')}</b></p>
+        <p>Signed in as <b>{info.get('email', 'your Google account')}</b></p>
         <p style='color:#a59f8e; font-size:13px;'>You can close this window. The CRM is now connected to Google Sheets &amp; Calendar.</p>
         <script>setTimeout(()=>{{ if(window.opener){{ window.opener.postMessage('gcal-connected','*'); window.close(); }} else {{ window.location.href = '/'; }} }}, 1500);</script>
         </body></html>
@@ -256,7 +257,7 @@ async def update_lesson(lesson_id: str, body: LessonIn, user=Depends(auth_mod.re
     creds = await _require_creds()
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
     all_lessons = await sheets_client.read_tab(creds, 'Lessons')
-    existing = next((l for l in all_lessons if l.get('id') == lesson_id), None)
+    existing = next((lsn for lsn in all_lessons if lsn.get('id') == lesson_id), None)
     if existing and existing.get('gcalEventId'):
         title = f"Lesson: {patch.get('studentName', existing.get('studentName'))} - {patch.get('style', existing.get('style', ''))}"
         await calendar_client.update_event(
@@ -276,9 +277,9 @@ async def update_lesson(lesson_id: str, body: LessonIn, user=Depends(auth_mod.re
 async def delete_lesson(lesson_id: str, user=Depends(auth_mod.require_staff)):
     creds = await _require_creds()
     all_lessons = await sheets_client.read_tab(creds, 'Lessons')
-    for l in all_lessons:
-        if l.get('id') == lesson_id and l.get('gcalEventId'):
-            await calendar_client.delete_event(creds, l['gcalEventId'])
+    for lsn in all_lessons:
+        if lsn.get('id') == lesson_id and lsn.get('gcalEventId'):
+            await calendar_client.delete_event(creds, lsn['gcalEventId'])
             break
     ok = await sheets_client.delete_row_by_id(creds, 'Lessons', lesson_id)
     if not ok:
@@ -605,7 +606,7 @@ async def sign_enrollment(enrollment_id: str, body: EnrollmentSignIn,
         'signedBy': body.signedBy.strip(),
         'signedAt': now_iso,
     }
-    updated = await sheets_client.update_row_by_id(creds, 'Enrollments', enrollment_id, patch)
+    await sheets_client.update_row_by_id(creds, 'Enrollments', enrollment_id, patch)
     enrollment.update(patch)
 
     # Update student totals

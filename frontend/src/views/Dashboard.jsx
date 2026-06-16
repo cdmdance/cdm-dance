@@ -120,7 +120,7 @@ const Dashboard = ({ onNavigate }) => {
               </div>
             )}
             {upcomingFromCalendar.map((e, i) => (
-              <div key={i} style={{
+              <div key={e.id || `${e.date}-${e.time}-${i}`} style={{
                 padding: '14px 22px',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -177,7 +177,7 @@ const Dashboard = ({ onNavigate }) => {
         </div>
         {upcomingByContacts.length === 0 ? (
           <div style={{ padding: 22, color: 'var(--text-dim)', textAlign: 'center' }}>
-            No contacts have a "Next Scheduled" date set.
+            No contacts have a &quot;Next Scheduled&quot; date set.
           </div>
         ) : (
           <table className="cdm-table">

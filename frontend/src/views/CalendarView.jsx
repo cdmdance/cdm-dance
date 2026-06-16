@@ -85,13 +85,13 @@ const CalendarView = () => {
 
       <div className="cal-grid">
         {DAY_NAMES.map(d => <div key={d} className="cal-head">{d}</div>)}
-        {daysGrid.map((cell, idx) => {
+        {daysGrid.map((cell) => {
           const iso = isoOf(cell.date);
           const evts = eventsByDate[iso] || [];
           const isToday = iso === todayISO;
           return (
             <div
-              key={idx}
+              key={`${iso}-${cell.otherMonth ? 'o' : 'm'}`}
               className={`cal-day ${cell.otherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}`}
               onClick={() => setSelectedDate(iso)}
             >

@@ -71,6 +71,7 @@ const SellSection = () => {
       // Reset form
       setAmount(''); setNotes('');
     } catch (e) {
+      console.error('Failed to record payment:', e);
       // toast handled in context
     }
   };
@@ -252,7 +253,7 @@ const PackagesSection = () => {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
         <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>
-          Define the packages you sell. Only "Active" packages appear in the Sell tab.
+          Define the packages you sell. Only &quot;Active&quot; packages appear in the Sell tab.
         </p>
         <button className="btn-gold" onClick={openCreate}>
           <Plus size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />New Package
@@ -263,7 +264,7 @@ const PackagesSection = () => {
         {packages.length === 0 && (
           <div className="cdm-card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 32 }}>
             <Box size={28} color="var(--gold-dim)" style={{ margin: '0 auto 12px', display: 'block' }} />
-            <p style={{ color: 'var(--text-dim)' }}>No packages yet. Click "New Package" to create your first one.</p>
+            <p style={{ color: 'var(--text-dim)' }}>No packages yet. Click &quot;New Package&quot; to create your first one.</p>
           </div>
         )}
         {packages.map(p => (
@@ -378,10 +379,15 @@ const HistorySection = () => {
 };
 
 /* ---------------- Receipt Modal ---------------- */
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
 const ReceiptModal = ({ receipt, onClose }) => {
   const print = () => {
     const w = window.open('', '_blank', 'width=500,height=700');
-    w.document.write(`
+    if (!w) return;
+    const html = `
       <html><head><title>Receipt</title>
       <style>
         body { font-family: Georgia, serif; padding: 40px; max-width: 380px; margin: auto; color: #222; }
@@ -393,16 +399,20 @@ const ReceiptModal = ({ receipt, onClose }) => {
       </style></head><body>
       <h1>CDM Dance</h1>
       <div class="sub">Receipt</div>
-      <div class="line"><span>Date</span><span>${receipt.date}</span></div>
-      <div class="line"><span>Student</span><span>${receipt.studentName}</span></div>
-      <div class="line"><span>Package</span><span>${receipt.packageName}</span></div>
-      <div class="line"><span>Lessons</span><span>${receipt.lessons}</span></div>
-      <div class="line"><span>Payment Method</span><span>${receipt.method}</span></div>
-      <div class="line total"><span>Total Paid</span><span>$${receipt.amount}</span></div>
-      ${receipt.notes ? `<div style="margin-top:14px;font-size:12px;font-style:italic;color:#666;">${receipt.notes}</div>` : ''}
+      <div class="line"><span>Date</span><span>${escapeHtml(receipt.date)}</span></div>
+      <div class="line"><span>Student</span><span>${escapeHtml(receipt.studentName)}</span></div>
+      <div class="line"><span>Package</span><span>${escapeHtml(receipt.packageName)}</span></div>
+      <div class="line"><span>Lessons</span><span>${escapeHtml(receipt.lessons)}</span></div>
+      <div class="line"><span>Payment Method</span><span>${escapeHtml(receipt.method)}</span></div>
+      <div class="line total"><span>Total Paid</span><span>$${escapeHtml(receipt.amount)}</span></div>
+      ${receipt.notes ? `<div style="margin-top:14px;font-size:12px;font-style:italic;color:#666;">${escapeHtml(receipt.notes)}</div>` : ''}
       <div class="thanks">Thank you - CDM Dance Services<br><span style="font-size:11px">cdmdanceservices@gmail.com</span></div>
-      </body></html>`);
+      </body></html>`;
+    // Safer than document.write: replace full document via DOMParser-free innerHTML on a new window
+    w.document.open();
+    w.document.write('<!doctype html><html><body></body></html>');
     w.document.close();
+    w.document.documentElement.innerHTML = html;
     w.focus();
     setTimeout(() => w.print(), 250);
   };

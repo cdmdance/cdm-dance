@@ -14,6 +14,27 @@ const tooltipStyle = {
   fontSize: 12,
 };
 
+// Helpers extracted out of component to keep useMemo bodies free of mutation
+const sortByKeyDesc = (items, key) => {
+  const copy = items.slice();
+  copy.sort((a, b) => b[key] - a[key]);
+  return copy;
+};
+const buildRanking = (obj, key) => {
+  const items = Object.entries(obj || {}).map(([name, v]) => ({ name, ...v }));
+  return sortByKeyDesc(items, key).slice(0, 10);
+};
+const computeCumulative = (monthlyChart) => {
+  let cum = 0;
+  const out = [];
+  for (let i = 0; i < monthlyChart.length; i = i + 1) {
+    const m = monthlyChart[i];
+    cum = cum + m.Earned + m.Projected;
+    out.push({ label: m.label, Total: cum });
+  }
+  return out;
+};
+
 const StatCard = ({ label, value, sub, icon, accent }) => (
   <div className="stat-card">
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -35,7 +56,6 @@ const Projections = () => {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
     api.get('/income/analysis', { params: { days_back: 180, days_forward: 180, calendar: 'primary' } })
       .then(res => { if (active) { setData(res.data); setError(null); } })
       .catch(e => { if (active) setError(e.response?.data?.detail || 'Failed to load income data'); })
@@ -56,26 +76,10 @@ const Projections = () => {
     return arr;
   }, [data]);
 
-  const cumulative = useMemo(() => {
-    let cum = 0;
-    return monthlyChart.map(m => ({ label: m.label, Total: (cum += m.Earned + m.Projected) }));
-  }, [monthlyChart]);
+  const cumulative = useMemo(() => computeCumulative(monthlyChart), [monthlyChart]);
 
-  const topHosts = useMemo(() => {
-    if (!data) return [];
-    return Object.entries(data.by_host)
-      .map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.hostings_total - a.hostings_total)
-      .slice(0, 10);
-  }, [data]);
-
-  const topStudents = useMemo(() => {
-    if (!data) return [];
-    return Object.entries(data.by_student)
-      .map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.lessons_total - a.lessons_total)
-      .slice(0, 10);
-  }, [data]);
+  const topHosts = useMemo(() => buildRanking(data?.by_host, 'hostings_total'), [data]);
+  const topStudents = useMemo(() => buildRanking(data?.by_student, 'lessons_total'), [data]);
 
   if (loading) {
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Analyzing calendar...</div>;
@@ -251,7 +255,7 @@ const Projections = () => {
             </thead>
             <tbody>
               {data.events.map((e, i) => (
-                <tr key={i}>
+                <tr key={`${e.date}-${e.time}-${e.summary}-${i}`}>
                   <td>{fmtDate(e.date)}</td>
                   <td className="text-dim">{e.time}</td>
                   <td style={{ color: 'var(--text)' }}>{e.summary}</td>

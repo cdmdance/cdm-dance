@@ -53,6 +53,16 @@ Clone the existing CRM at cdm.dance/crm.html maintaining its dark+gold aesthetic
 - SMTP stub in place (download-only mode by user choice)
 - Deployment readiness check: PASSED
 
+### 2026-02 — Code Review Fixes
+- Fixed undefined `info` variable in `server.py` oauth_callback (initialized before try)
+- Fixed XSS risk in `POS.jsx` receipt printer: replaced `document.write` with safer DOM approach + HTML-escaped all user values
+- Added error logging to silent `catch` block in `POS.jsx`
+- Replaced array-index React keys with stable composite keys (Projections, Dashboard, CalendarView)
+- Refactored mutation patterns in `Projections.jsx` into pure helper functions (`sortByKeyDesc`, `buildRanking`, `computeCumulative`)
+- Renamed ambiguous `l` → `lsn` and removed unused `updated` var in `server.py`
+- Fixed JSX unescaped entities (quotes/apostrophes) in POS, Dashboard, Enrollments
+- All blocking lint errors resolved; deployment readiness re-verified PASS
+
 ## Roadmap
 ### P0 (current)
 - [x] Verify deployment readiness
